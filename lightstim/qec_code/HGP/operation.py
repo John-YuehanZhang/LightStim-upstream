@@ -61,6 +61,19 @@ every ordered pair of logicals and every choice of x.  The pivot x is taken to
 be ρ_c, the qubit shared by X̄_c and Z̄_c.  Support |I_c| + |I_t|, gates
 2(|I_c| − 1) + |I_t|, all touching x (one TICK each).
 
+Targeted logical Paulis
+-----------------------
+X̄_i is X on I = supp(X̄_i), Z̄_i is Z on J = supp(Z̄_i), and Ȳ_i = i·X̄_i·Z̄_i is
+X on I \\ {ρ}, Z on J \\ {ρ} and Y on ρ (up to a global phase).  Each is one
+layer of physical Paulis, commutes with every stabilizer generator, and
+conjugates the target's logical Paulis by the usual signs (X̄_i sends
+Z̄_i ↦ −Z̄_i, Z̄_i sends X̄_i ↦ −X̄_i, Ȳ_i flips both); every other logical
+Pauli is fixed.  They are not from the paper; they exist to prepare
+|1̄⟩ or |−̄⟩ on a chosen logical qubit, to express Pauli-frame corrections
+(the Hadamard's frame layer is Ȳ_i) and to check identities such as
+S̄² = Z̄ in tests.  Under LightStim's circuit-level model physical X/Y/Z gates
+take DEPOLARIZE1 like any other gate.
+
 Targeted logical Hadamard (Algorithm 2)
 ---------------------------------------
 
@@ -103,7 +116,7 @@ Consequences in LightStim:
       every shot, while an exact H̄ gives 0.
 
 :meth:`HGPCodeLogicalOpSet.targeted_hadamard` therefore appends, by default,
-the logical Pauli frame correction Ȳ = X̄·Z̄ as one physical Pauli layer
+the logical Pauli frame correction Ȳ = i·X̄·Z̄ as one physical Pauli layer
 (:func:`logical_y_frame_circuit`: X on I*, Z on J*, Y on ρ), so that the net
 action is exactly H̄.  The eight steps themselves are never altered, so the
 frame's Y on ρ directly follows step 8's Y on ρ; the two cancel logically but
@@ -227,21 +240,39 @@ def targeted_hadamard_algorithm2(x_support: Iterable[int], z_support: Iterable[i
     return circuit
 
 
-def logical_y_frame_circuit(x_support: Iterable[int], z_support: Iterable[int]) -> stim.Circuit:
-    """The logical Pauli Ȳ = X̄·Z̄ of one canonical pair as a single Pauli layer.
+def logical_pauli_circuit(
+    letter: str, x_support: Iterable[int], z_support: Iterable[int]
+) -> stim.Circuit:
+    """One canonical pair's logical Pauli X̄, Ȳ or Z̄ as a single physical Pauli layer.
 
-    X on I*, Z on J*, and Y on ρ (X_ρ·Z_ρ ∝ Y_ρ).  Appended after Algorithm 2
+    ``"X"``: X on I = supp(X̄).  ``"Z"``: Z on J = supp(Z̄).  ``"Y"``: X on
+    I \\ {ρ}, Z on J \\ {ρ} and Y on ρ, which is i·X̄·Z̄ up to a global phase.
+    """
+    if letter not in ("X", "Y", "Z"):
+        raise ValueError(f"letter must be 'X', 'Y' or 'Z', got {letter!r}.")
+    rho, i_all, i_star, j_star = _split_supports(x_support, z_support)
+    circuit = stim.Circuit()
+    if letter == "X":
+        circuit.append("X", i_all)
+    elif letter == "Z":
+        circuit.append("Z", sorted(set(z_support)))
+    else:
+        if i_star:
+            circuit.append("X", i_star)
+        if j_star:
+            circuit.append("Z", j_star)
+        circuit.append("Y", [rho])
+    return circuit
+
+
+def logical_y_frame_circuit(x_support: Iterable[int], z_support: Iterable[int]) -> stim.Circuit:
+    """The logical Pauli Ȳ = i·X̄·Z̄ of one canonical pair as a single Pauli layer.
+
+    Same as ``logical_pauli_circuit("Y", ...)``.  Appended after Algorithm 2
     it cancels the residual Ȳ, so the total is exactly H̄.  It commutes with
     every stabilizer, so the signs fixed by step 8 stay fixed.
     """
-    rho, _, i_star, j_star = _split_supports(x_support, z_support)
-    circuit = stim.Circuit()
-    if i_star:
-        circuit.append("X", i_star)
-    if j_star:
-        circuit.append("Z", j_star)
-    circuit.append("Y", [rho])
-    return circuit
+    return logical_pauli_circuit("Y", x_support, z_support)
 
 
 def targeted_hadamard_circuit(x_support: Iterable[int], z_support: Iterable[int]) -> stim.Circuit:
@@ -322,12 +353,14 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
     Inherits ``transversal_cnot`` (between two patches) from
     :class:`CSSLogicalOpSet` and adds the targeted logical gates of Patra and
     Barg inside one patch: single-qubit Hadamard, S and S†, and the two-qubit
-    CNOT between any two logical qubits.  Available through::
+    CNOT between any two logical qubits, plus the targeted logical Paulis
+    X̄, Ȳ, Z̄.  Available through::
 
         executor.apply_logical_operation("targeted_hadamard", [patch], logical_id=i)
         executor.apply_logical_operation("targeted_s", [patch], logical_id=i)
         executor.apply_logical_operation("targeted_s_dag", [patch], logical_id=i)
         executor.apply_logical_operation("targeted_cnot", [patch], control_id=i, target_id=j)
+        executor.apply_logical_operation("targeted_x", [patch], logical_id=i)   # also targeted_y, targeted_z
 
     ``patch`` must be the global patch returned by ``QECSystem.add_patch`` so
     that its logical records carry global qubit indices.
@@ -469,6 +502,27 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
         builder.apply_unitary_block(circuit, noiseless=noiseless)
         return circuit
 
+    def targeted_x(self, builder: CircuitBuilder, patch: QECPatch, logical_id: int,
+                   noiseless: bool = False) -> stim.Circuit:
+        """Apply the logical X̄ of one logical qubit: physical X on supp(X̄)."""
+        return self._apply_pauli(builder, patch, logical_id, "X", noiseless)
+
+    def targeted_y(self, builder: CircuitBuilder, patch: QECPatch, logical_id: int,
+                   noiseless: bool = False) -> stim.Circuit:
+        """Apply the logical Ȳ = i·X̄·Z̄ of one logical qubit (X on I*, Z on J*, Y on ρ)."""
+        return self._apply_pauli(builder, patch, logical_id, "Y", noiseless)
+
+    def targeted_z(self, builder: CircuitBuilder, patch: QECPatch, logical_id: int,
+                   noiseless: bool = False) -> stim.Circuit:
+        """Apply the logical Z̄ of one logical qubit: physical Z on supp(Z̄)."""
+        return self._apply_pauli(builder, patch, logical_id, "Z", noiseless)
+
+    def _apply_pauli(self, builder, patch, logical_id, letter, noiseless):
+        x_support, z_support = self._resolve_supports(builder, patch, logical_id)
+        circuit = logical_pauli_circuit(letter, x_support, z_support)
+        builder.apply_unitary_block(circuit, noiseless=noiseless)
+        return circuit
+
     def _apply_phase(self, builder, patch, logical_id, gate, noiseless):
         x_support, z_support = self._resolve_supports(builder, patch, logical_id)
         circuit = targeted_phase_circuit(z_support, pivot_qubit(x_support, z_support), gate)
@@ -500,6 +554,7 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
 
 __all__ = [
     "HGPCodeLogicalOpSet",
+    "logical_pauli_circuit",
     "logical_supports",
     "logical_y_frame_circuit",
     "pivot_qubit",

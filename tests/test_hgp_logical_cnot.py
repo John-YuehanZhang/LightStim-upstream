@@ -6,6 +6,7 @@ import itertools
 import pathlib
 import sys
 
+import numpy as np
 import pytest
 import stim
 
@@ -223,3 +224,54 @@ def test_local_patch_is_rejected_and_global_patch_targets_its_own_qubits():
         op_set.targeted_cnot(builder, second, control_id=0, target_id=7)
     with pytest.raises(TypeError, match="logical_id must be an integer"):
         op_set.targeted_cnot(builder, second, control_id=0, target_id=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Inherited block-to-block transversal CNOT (CSSLogicalOpSet)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("factory,offset", [(hgp_18_2_3, (20, 0)), (hgp_225_9_4, (40, 0))])
+def test_inherited_transversal_cnot_pairs_logicals_by_id(factory, offset):
+    """Physical CNOTs qubit-by-qubit between two identical patches act as k logical CNOTs."""
+    from lightstim.ir.builder import CircuitBuilder
+    from lightstim.ir.tracker import SyndromeTracker
+    from lightstim.utils.linear_algebra import row_echelon
+
+    system = QECSystem()
+    first = system.add_patch(factory(), name="a")
+    second = system.add_patch(factory(), name="b", offset=offset)
+    n = system.num_qubits
+    tracker = SyndromeTracker(num_qubits=n, expected_num_logicals=system.num_logicals)
+    builder = CircuitBuilder(tracker=tracker, system_config=system, if_detector=True)
+    system.register_tracker(tracker)
+    system.register_builder(builder)
+    builder.write_coordinates()
+    builder.initialize({q: "Z" for q in sorted(system.data_indices)}, n)
+    before = len(builder.circuit)
+    HGPCodeLogicalOpSet().transversal_cnot(builder, first, second)
+    block = builder.circuit[before:]
+    assert sum(len(i.targets_copy()) // 2 for i in block if i.name in ("CX", "CNOT")) == first.num_data_qubits
+    tableau = _padded_tableau(block, n)
+
+    # Stabilizer group of the two-patch system preserved with sign (generators map to products).
+    for letter in ("X", "Z"):
+        rows = [s["data_indices"] for p in (first, second) for s in p.stabilizers if s["type"] == letter]
+        matrix = np.zeros((len(rows), n), dtype=np.uint8)
+        for r, idx in enumerate(rows):
+            matrix[r, idx] = 1
+        rank = row_echelon(matrix)[1]
+        for idx in rows:
+            image = tableau(_pauli(n, idx, letter))
+            text = str(image)[1:]
+            assert image.sign == 1 and all(ch in ("_", letter) for ch in text)
+            vector = np.zeros(n, dtype=np.uint8)
+            vector[[i for i, ch in enumerate(text) if ch == letter]] = 1
+            assert row_echelon(np.vstack([matrix, vector]))[1] == rank
+
+    # Logical action, pairing by logical_id: X̄ᵢᵃ -> X̄ᵢᵃ X̄ᵢᵇ, Z̄ᵢᵇ -> Z̄ᵢᵃ Z̄ᵢᵇ, others fixed.
+    sa, sb = logical_supports(first), logical_supports(second)
+    for i in sa:
+        xa, za = _pauli(n, sa[i]["X"], "X"), _pauli(n, sa[i]["Z"], "Z")
+        xb, zb = _pauli(n, sb[i]["X"], "X"), _pauli(n, sb[i]["Z"], "Z")
+        assert tableau(xa) == xa * xb and tableau(zb) == za * zb
+        assert tableau(za) == za and tableau(xb) == xb

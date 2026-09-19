@@ -13,6 +13,7 @@ from .instances import (
 )
 from .operation import (
     HGPCodeLogicalOpSet,
+    logical_pauli_circuit,
     logical_supports,
     logical_y_frame_circuit,
     pivot_qubit,
@@ -42,6 +43,7 @@ __all__ = [
     "hgp_18_2_3_seed",
     "hgp_225_9_4",
     "hgp_225_9_4_seed",
+    "logical_pauli_circuit",
     "logical_supports",
     "logical_y_frame_circuit",
     "pivot_qubit",
