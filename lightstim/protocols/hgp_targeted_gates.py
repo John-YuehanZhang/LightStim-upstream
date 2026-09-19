@@ -5,20 +5,24 @@ for :class:`HGPCode` patches::
 
     init(basis) → SE rounds → targeted gate(s) → SE rounds → transversal readout
 
-A gate is addressed as ``(op_name, logical_id)``, e.g.
-``("targeted_hadamard", 4)`` or ``("targeted_s", 0)``.  A logical qubit is
-read out only if the gates map its initial logical operator onto the readout
-basis: for example with ``init_basis="Z"`` and ``measure_basis="X"`` the
-qubits that received an odd number of Hadamards, and with ``"X"``/``"X"``
-the qubits whose S and S† gates cancel (a lone S sends X̄ to Ȳ, which no
-transversal readout resolves).  The tracker emits one observable per such
-qubit; the others are left unresolved, and a circuit in which no logical is
-resolvable is rejected with ValueError.
+A gate is addressed as ``(op_name, logical_id)`` for single-qubit gates, e.g.
+``("targeted_hadamard", 4)`` or ``("targeted_s", 0)``, or as
+``(op_name, kwargs)`` with a dict of keyword arguments, e.g.
+``("targeted_cnot", {"control_id": 0, "target_id": 1})``.  The tracker
+starts from one logical operator per logical qubit (Z̄ for ``init_basis="Z"``,
+X̄ for ``"X"``), pushes each through the gates, and emits one observable for
+every pushed operator that the transversal readout resolves; the others are
+left unresolved.  Examples: with ``"Z"``/``"X"`` the qubits that received an
+odd number of Hadamards; with ``"X"``/``"X"`` the qubits whose S and S† gates
+cancel (a lone S sends X̄ to Ȳ, which no transversal readout resolves); after
+a CNOT the pushed operator can be a joint parity such as Z̄_c·Z̄_t, which is
+then one observable.  A circuit in which nothing is resolvable is rejected
+with ValueError.
 """
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Sequence, Tuple, Type
+from typing import Literal, Optional, Sequence, Tuple, Type, Union
 
 import stim
 
@@ -34,7 +38,7 @@ from lightstim.qec_code.HGP import (
 )
 
 
-GateSpec = Tuple[str, int]
+GateSpec = Tuple[str, Union[int, dict]]
 
 
 def build_hgp_gate_verification_circuit(
@@ -55,8 +59,10 @@ def build_hgp_gate_verification_circuit(
 
     Args:
         patch: Local HGPCode patch (it is placed into a fresh QECSystem).
-        gates: Sequence of ``(op_name, logical_id)`` applied in order, where
-            ``op_name`` is a method of :class:`HGPCodeLogicalOpSet`.
+        gates: Sequence of ``(op_name, logical_id)`` or ``(op_name, kwargs)``
+            applied in order, where ``op_name`` is a method of
+            :class:`HGPCodeLogicalOpSet` and ``kwargs`` a dict of its keyword
+            arguments (e.g. ``{"control_id": 0, "target_id": 1}``).
         init_basis: Transversal initialization basis of all data qubits.
         measure_basis: Transversal readout basis of all data qubits.
         rounds: Syndrome-extraction rounds before and after the gates.
@@ -85,6 +91,19 @@ def build_hgp_gate_verification_circuit(
         raise ValueError(
             "Pass noiseless_gates=... instead of gate_kwargs={'noiseless': ...}."
         )
+    for op_name, target in gates:
+        if isinstance(target, dict):
+            if "noiseless" in target:
+                raise ValueError(
+                    f"Gate {op_name!r}: pass noiseless_gates=... instead of a "
+                    "'noiseless' entry in the gate spec."
+                )
+            clash = sorted(set(target) & set(gate_kwargs or {}))
+            if clash:
+                raise ValueError(
+                    f"Gate {op_name!r}: keys {clash} appear both in the gate spec "
+                    "and in gate_kwargs."
+                )
 
     system = QECSystem()
     global_patch = system.add_patch(patch, name=patch_name)
@@ -113,10 +132,11 @@ def build_hgp_gate_verification_circuit(
     builder.apply_syndrome_extraction(
         se_block.circuit, rounds=rounds, measurement_blocks=measurement_blocks
     )
-    for op_name, logical_id in gates:
+    for op_name, target in gates:
+        call_kwargs = dict(target) if isinstance(target, dict) else {"logical_id": target}
         executor.apply_logical_operation(
-            op_name, [global_patch], logical_id=logical_id, noiseless=noiseless_gates,
-            **(gate_kwargs or {}),
+            op_name, [global_patch], noiseless=noiseless_gates,
+            **call_kwargs, **(gate_kwargs or {}),
         )
     builder.apply_syndrome_extraction(
         se_block.circuit, rounds=rounds, measurement_blocks=measurement_blocks
