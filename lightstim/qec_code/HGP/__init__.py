@@ -11,6 +11,14 @@ from .instances import (
     hgp_225_9_4,
     hgp_225_9_4_seed,
 )
+from .operation import (
+    HGPCodeLogicalOpSet,
+    logical_supports,
+    logical_y_frame_circuit,
+    pivot_qubit,
+    targeted_hadamard_algorithm2,
+    targeted_hadamard_circuit,
+)
 from .SE_block import (
     HGPCodeExtractionBlock,
     HGPProductColorLayer,
@@ -22,6 +30,7 @@ __all__ = [
     "CanonicalKernelBasis",
     "HGPCode",
     "HGPCodeExtractionBlock",
+    "HGPCodeLogicalOpSet",
     "HGPProductColorLayer",
     "HGPProductColorationExtractionBlock",
     "canonical_kernel_basis",
@@ -31,4 +40,9 @@ __all__ = [
     "hgp_18_2_3_seed",
     "hgp_225_9_4",
     "hgp_225_9_4_seed",
+    "logical_supports",
+    "logical_y_frame_circuit",
+    "pivot_qubit",
+    "targeted_hadamard_algorithm2",
+    "targeted_hadamard_circuit",
 ]
