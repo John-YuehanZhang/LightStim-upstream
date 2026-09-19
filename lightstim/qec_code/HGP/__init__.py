@@ -18,6 +18,7 @@ from .operation import (
     pivot_qubit,
     targeted_hadamard_algorithm2,
     targeted_hadamard_circuit,
+    targeted_phase_circuit,
 )
 from .SE_block import (
     HGPCodeExtractionBlock,
@@ -45,4 +46,5 @@ __all__ = [
     "pivot_qubit",
     "targeted_hadamard_algorithm2",
     "targeted_hadamard_circuit",
+    "targeted_phase_circuit",
 ]

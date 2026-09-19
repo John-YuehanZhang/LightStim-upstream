@@ -1,14 +1,47 @@
 """Targeted logical Clifford gates for hypergraph-product codes.
 
 Transcribed from Patra and Barg, "Targeted Clifford logical gates for
-hypergraph product codes", Quantum (accepted 2025-08-22), arXiv:2411.17050v3,
-Section 4.2.2 (Theorem 4.6, Algorithm 2, Figure 2).
+hypergraph product codes", Quantum (accepted 2025-08-22), arXiv:2411.17050v3:
+Section 4.2.2 (Theorem 4.6, Algorithm 2, Figure 2) for the Hadamard and
+Section 4.2.1 (Theorem 4.4, Algorithm 1, Figure 3(a)) for the phase gate S.
 
 Every logical qubit of an HGP patch is one canonical pair (X̄, Z̄) whose
 supports I = supp(X̄) and J = supp(Z̄) lie on one row and one column of the
 same sector and overlap on exactly one qubit ρ (Theorem 4.2 of the paper;
-LightStim builds this basis in :mod:`.algebra` and :mod:`.code_patch`).  The
-targeted Hadamard acts on that logical qubit only.
+LightStim builds this basis in :mod:`.algebra` and :mod:`.code_patch`).  Each
+targeted gate acts on that logical qubit only.
+
+Targeted logical S (Algorithm 1, steps 1-4)
+-------------------------------------------
+Algorithm 1 of the paper, with I = supp(Z̄) in the paper's notation (here J):
+
+    1. Select any qubit x in J.
+    2. CNOT layer: for y in J \\ {x}, CNOT from y to x
+    3. Phase gate S on qubit x
+    4. CNOT layer: for y in J \\ {x}, CNOT from y to x
+    5. X on qubit x
+
+STEP 5 IS OMITTED HERE.  Steps 2-4 map Z_x to Z̄ and back, so steps 1-4 equal
+exp(−iπ/4·Z̄) up to a global phase: that is the logical S̄ itself, it
+commutes with every stabilizer generator, and it maps X̄ ↦ i·X̄·Z̄ = Ȳ and
+fixes Z̄.  The paper adds step 5 because Appendix A.2.2 (Case II) states that
+the Phase gate flips the sign of the Z-type checks through x; but S·Z·S† = Z,
+so no sign ever changes.  The X on x therefore has nothing to correct and,
+being a single-qubit Pauli that is not a logical operator, it anticommutes
+with every Z-type check through x and with Z̄.  Checked with stim tableaus
+on the bundled instances and on non-self-product codes: steps 1-4 fix all
+stabilizer generators with sign and act exactly as S̄ (S̄† when step 3 uses
+S†); adding step 5 flips exactly the Z-type generators containing x (1 on
+[[13,1,3]], 2 on [[18,2,3]], 3 on [[225,9,4]]) and maps Z̄ ↦ −Z̄.  The X
+layer of the alternative Algorithm 5 (Appendix A.3, S on J then CZ on every
+pair of J) is unnecessary for the same reason: S-layer plus CZ-layer already
+equals exp(−iπ/4·Z̄), and the X layer flips every Z-type generator that
+touches J and maps Z̄ ↦ (−1)^|J|·Z̄.  The pivot x is taken to be ρ for
+consistency with the Hadamard; any x in J gives the same gate.
+Support |J|, 2(|J|−1) CNOTs all touching x (one TICK each), one S.
+
+Targeted logical Hadamard (Algorithm 2)
+---------------------------------------
 
 Algorithm 2 of the paper, verbatim (I* = I \\ {ρ}, J* = J \\ {ρ}):
 
@@ -198,14 +231,45 @@ def targeted_hadamard_circuit(x_support: Iterable[int], z_support: Iterable[int]
     return circuit
 
 
+def targeted_phase_circuit(
+    z_support: Iterable[int], pivot: int, gate: str = "S"
+) -> stim.Circuit:
+    """Steps 1-4 of Algorithm 1 of Patra and Barg: exactly S̄ (or S̄†) on the target.
+
+    ``z_support`` is J = supp(Z̄), ``pivot`` is the qubit x of step 1 (any
+    element of J), ``gate`` is ``"S"`` or ``"S_DAG"`` for step 3.  Step 5 of
+    the paper (X on x) is deliberately not emitted; see the module docstring.
+    """
+    if gate not in ("S", "S_DAG"):
+        raise ValueError(f"gate must be 'S' or 'S_DAG', got {gate!r}.")
+    j_all = sorted(set(z_support))
+    if pivot not in j_all:
+        raise ValueError(f"pivot {pivot} is not in the Z support {j_all}.")
+    others = [q for q in j_all if q != pivot]
+    circuit = stim.Circuit()
+    _append_sequential(circuit, "CX", [(y, pivot) for y in others])  # step 2: CNOT from y to x
+    circuit.append(gate, [pivot])                                     # step 3
+    if others:
+        circuit.append("TICK")
+        for index, y in enumerate(others):                            # step 4: CNOT from y to x
+            circuit.append("CX", [y, pivot])
+            if index < len(others) - 1:
+                circuit.append("TICK")
+    # step 5 (X on x) omitted on purpose: it is not a logical operator and
+    # flips every Z-type check through x; steps 1-4 are already exactly S̄.
+    return circuit
+
+
 class HGPCodeLogicalOpSet(CSSLogicalOpSet):
     """Logical operation set for :class:`HGPCode` patches.
 
     Inherits ``transversal_cnot`` (between two patches) from
     :class:`CSSLogicalOpSet` and adds the targeted single-qubit logical
-    Hadamard of Patra and Barg.  Available through::
+    Hadamard, S and S† of Patra and Barg.  Available through::
 
         executor.apply_logical_operation("targeted_hadamard", [patch], logical_id=i)
+        executor.apply_logical_operation("targeted_s", [patch], logical_id=i)
+        executor.apply_logical_operation("targeted_s_dag", [patch], logical_id=i)
 
     ``patch`` must be the global patch returned by ``QECSystem.add_patch`` so
     that its logical records carry global qubit indices.
@@ -259,6 +323,68 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
             :func:`targeted_hadamard_circuit`.  The returned copy carries no
             ``noiseless`` tags; the builder's circuit does when requested.
         """
+        x_support, z_support = self._resolve_supports(builder, patch, logical_id)
+
+        algorithm2 = targeted_hadamard_algorithm2(x_support, z_support)
+        builder.apply_unitary_block(algorithm2, noiseless=noiseless)
+        emitted = algorithm2
+        if pauli_frame_correction:
+            frame = logical_y_frame_circuit(x_support, z_support)
+            builder.apply_unitary_block(
+                frame, noiseless=(noiseless or not noisy_frame_correction)
+            )
+            emitted = algorithm2.copy()
+            emitted.append("TICK")   # apply_unitary_block separates the blocks
+            emitted += frame
+        return emitted
+
+    def targeted_s(
+        self,
+        builder: CircuitBuilder,
+        patch: QECPatch,
+        logical_id: int,
+        noiseless: bool = False,
+    ) -> stim.Circuit:
+        """Apply the targeted logical S to one logical qubit of ``patch``.
+
+        Steps 1-4 of Algorithm 1 (CNOT fan-in from J \\ {ρ} into ρ, S on ρ,
+        fan-in again).  The paper's step 5 (X on ρ) is not emitted: steps 1-4
+        already equal exp(−iπ/4·Z̄), an exact S̄ that fixes every stabilizer
+        generator with sign and maps X̄ ↦ i·X̄·Z̄; the extra X would flip
+        every Z-type check through ρ (module docstring).  No Pauli frame
+        layer is needed, unlike the Hadamard.
+
+        Args:
+            builder: CircuitBuilder driving the experiment.
+            patch: Global HGPCode patch (returned by ``system.add_patch``);
+                a local patch is rejected with ValueError.
+            logical_id: Index of the canonical logical pair, as for
+                :meth:`targeted_hadamard`.
+            noiseless: If True, tag every emitted gate as noiseless.
+
+        Returns:
+            The appended circuit, i.e. :func:`targeted_phase_circuit`.
+        """
+        return self._apply_phase(builder, patch, logical_id, "S", noiseless)
+
+    def targeted_s_dag(
+        self,
+        builder: CircuitBuilder,
+        patch: QECPatch,
+        logical_id: int,
+        noiseless: bool = False,
+    ) -> stim.Circuit:
+        """Apply the targeted logical S† (step 3 of Algorithm 1 uses S†)."""
+        return self._apply_phase(builder, patch, logical_id, "S_DAG", noiseless)
+
+    def _apply_phase(self, builder, patch, logical_id, gate, noiseless):
+        x_support, z_support = self._resolve_supports(builder, patch, logical_id)
+        circuit = targeted_phase_circuit(z_support, pivot_qubit(x_support, z_support), gate)
+        builder.apply_unitary_block(circuit, noiseless=noiseless)
+        return circuit
+
+    def _resolve_supports(self, builder, patch, logical_id):
+        """Validate the call and return the global (I, J) supports of the pair."""
         if not isinstance(patch, HGPCode):
             raise TypeError(f"Expected an HGPCode patch, got {type(patch).__name__}.")
         # A local (unregistered) patch carries local indices; emitting them as
@@ -277,21 +403,7 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
                 f"(n={patch.num_data_qubits}, k={len(supports)}) has logicals "
                 f"{sorted(supports)}."
             )
-        x_support = supports[logical_id]["X"]
-        z_support = supports[logical_id]["Z"]
-
-        algorithm2 = targeted_hadamard_algorithm2(x_support, z_support)
-        builder.apply_unitary_block(algorithm2, noiseless=noiseless)
-        emitted = algorithm2
-        if pauli_frame_correction:
-            frame = logical_y_frame_circuit(x_support, z_support)
-            builder.apply_unitary_block(
-                frame, noiseless=(noiseless or not noisy_frame_correction)
-            )
-            emitted = algorithm2.copy()
-            emitted.append("TICK")   # apply_unitary_block separates the blocks
-            emitted += frame
-        return emitted
+        return supports[logical_id]["X"], supports[logical_id]["Z"]
 
 
 __all__ = [
@@ -301,4 +413,5 @@ __all__ = [
     "pivot_qubit",
     "targeted_hadamard_algorithm2",
     "targeted_hadamard_circuit",
+    "targeted_phase_circuit",
 ]

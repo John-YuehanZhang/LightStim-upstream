@@ -6,11 +6,14 @@ for :class:`HGPCode` patches::
     init(basis) → SE rounds → targeted gate(s) → SE rounds → transversal readout
 
 A gate is addressed as ``(op_name, logical_id)``, e.g.
-``("targeted_hadamard", 4)``.  With ``init_basis="Z"`` and
-``measure_basis="X"`` only the logical qubits that received an odd number of
-Hadamards have a deterministic readout, and the tracker emits one observable
-per such qubit; the untouched logical qubits are left unresolved.  A circuit
-in which no logical is resolvable is rejected with ValueError.
+``("targeted_hadamard", 4)`` or ``("targeted_s", 0)``.  A logical qubit is
+read out only if the gates map its initial logical operator onto the readout
+basis: for example with ``init_basis="Z"`` and ``measure_basis="X"`` the
+qubits that received an odd number of Hadamards, and with ``"X"``/``"X"``
+the qubits whose S and S† gates cancel (a lone S sends X̄ to Ȳ, which no
+transversal readout resolves).  The tracker emits one observable per such
+qubit; the others are left unresolved, and a circuit in which no logical is
+resolvable is rejected with ValueError.
 """
 
 from __future__ import annotations
@@ -123,8 +126,9 @@ def build_hgp_gate_verification_circuit(
         raise ValueError(
             "No logical qubit is resolvable by this circuit: with "
             f"init_basis={init_basis!r} and measure_basis={measure_basis!r} a "
-            "logical is read out only if it received an odd number of "
-            "Hadamards (X<->Z) or an even number (same basis); gates="
+            "logical is read out only if the gates map its initial logical "
+            "operator onto the readout basis (e.g. an odd number of Hadamards "
+            "for X<->Z, or S/S_DAG pairs cancelling for X->X); gates="
             f"{list(gates)!r}."
         )
 
