@@ -51,8 +51,8 @@ from lightstim.ir.tracker import SyndromeTracker
 from lightstim.noise.config import NoiseConfig
 from lightstim.qec_code.HGP import (
     HGPCode,
-    HGPCodeLogicalOpSet,
     HGPProductColorationExtractionBlock,
+    register_hgp_op_set,
 )
 
 
@@ -142,9 +142,7 @@ def build_hgp_gate_verification_circuit(
     system.register_builder(builder)
 
     executor = LogicalExecutor(builder)
-    executor.register_op_set(
-        HGPCode, HGPCodeLogicalOpSet(extraction_block_class=extraction_block_class)
-    )
+    register_hgp_op_set(executor, extraction_block_class=extraction_block_class)
 
     builder.write_coordinates()
     se_block = extraction_block_class(system, **(se_block_kwargs or {}))

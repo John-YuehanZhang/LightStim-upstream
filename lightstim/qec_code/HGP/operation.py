@@ -64,6 +64,25 @@ Deviations / choices.
   product in either order.
 * No Pauli frame is involved: the logical action is exactly H̄^{⊗k} · SWAP,
   with no residual logical Pauli.
+
+Homomorphic CNOT (Table I "inter-block CNOTs"; Definition 3, Algorithm 1
+step 4, Section V A)
+--------------------------------------------------------------------------
+Paper rule.  Between a data code ``Q`` and an ancilla ``Q'`` obtained by
+puncturing a base code of ``Q`` (see :mod:`.homomorphic`), physical
+transversal CNOTs between the qubits of ``Q`` and ``Q'`` that share a
+coordinate implement logical transversal CNOTs between the logical qubits
+that share a coordinate (Eq. 35-36); the deleted logical qubits are
+untouched.  ``Q`` controls when the horizontal code was punctured; ``Q'``
+controls when the vertical code was punctured (Sec. V A).  With nothing
+punctured this is the standard transversal CNOT between two identical
+blocks.  Time cost O(1).
+
+Transcription.  ``homomorphic_cnot(builder, data_patch, ancilla_patch)``
+takes the pairs from :func:`homomorphic_qubit_pairs` (coordinates, not
+index order: the ancilla is smaller than the data patch, so the inherited
+``transversal_cnot`` and its sorted-index pairing do not apply) and emits
+one ``CX`` layer in the direction fixed by the puncture axis.
 """
 
 from __future__ import annotations
@@ -79,6 +98,11 @@ from lightstim.ir.qec_patch import QECPatch
 from lightstim.qec_code._operation_utils import require_global_patch
 
 from .code_patch import HGPCode
+from .homomorphic import (
+    PuncturedHGPCode,
+    homomorphic_cnot_circuit,
+    homomorphic_qubit_pairs,
+)
 
 
 IndexPair = Tuple[int, int]
@@ -237,11 +261,19 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
 
     Inherits ``transversal_cnot`` (between two identical patches) from
     :class:`CSSLogicalOpSet` and adds the fold-transversal H-SWAP of a
-    symmetric HGP code (module docstring)::
+    symmetric HGP code and the homomorphic CNOT to a punctured ancilla
+    (module docstring)::
 
         executor.apply_logical_operation("fold_transversal_h_swap", [patch])
+        executor.apply_logical_operation("homomorphic_cnot", [data_patch, ancilla_patch])
 
-    ``patch`` must be the global patch returned by ``QECSystem.add_patch``.
+    Patches must be the global patches returned by ``QECSystem.add_patch``.
+
+    ``LogicalExecutor`` dispatches on the exact type of the first patch, so
+    an ancilla (:class:`PuncturedHGPCode`) as first patch, e.g. the mask
+    step of the paper's Fig. 2(a) or an H-SWAP on an ancilla, needs the op
+    set registered for that class too.  :func:`register_hgp_op_set` does
+    both registrations.
 
     ``extraction_block_class`` is stored for interface parity with the other
     op sets (e.g. ``RotatedSurfaceCodeLogicalOpSet``); the H-SWAP does not
@@ -297,6 +329,66 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
             builder.apply_unitary_block(swap_layer, noiseless=(noiseless or not noisy_swap))
         return fold_h_swap_circuit(data_qubits, mirror_pairs)
 
+    def homomorphic_cnot(
+        self,
+        builder: CircuitBuilder,
+        data_patch: QECPatch,
+        ancilla_patch: QECPatch,
+        noiseless: bool = False,
+    ) -> stim.Circuit:
+        """Apply the homomorphic CNOT between ``data_patch`` and its punctured ancilla.
+
+        Physical action: one layer of CNOTs between the qubits of the two
+        patches that share a coordinate (Alg. 1 step 4).  Direction: the
+        data patch controls for a horizontal puncture, the ancilla controls
+        for a vertical puncture (Sec. V A); see
+        ``ancilla_patch.puncture.control``.
+
+        Logical action (Eq. 35-36): a logical CNOT, in the same direction,
+        between every logical qubit of the ancilla and the data logical
+        qubit at the same grid coordinate; data logical qubits on the
+        punctured columns/rows are untouched.  The tracker follows it.
+
+        Args:
+            builder: CircuitBuilder driving the experiment.
+            data_patch: Global HGPCode patch the ancilla was punctured from.
+            ancilla_patch: Global :class:`PuncturedHGPCode` patch whose
+                ``puncture`` records the parent's seeds, the axis and the
+                deleted bits; a mismatch with ``data_patch`` is a ValueError.
+            noiseless: If True, tag the CNOT layer as noiseless.
+
+        Returns:
+            The appended ``CX`` layer, i.e.
+            :func:`homomorphic_cnot_circuit` on the global pairs.
+        """
+        if not isinstance(data_patch, HGPCode):
+            raise TypeError(f"data_patch must be an HGPCode patch, got {type(data_patch).__name__}.")
+        if not isinstance(ancilla_patch, PuncturedHGPCode):
+            raise TypeError(
+                "ancilla_patch must be a PuncturedHGPCode (built from data_patch), "
+                f"got {type(ancilla_patch).__name__}."
+            )
+        pairs = homomorphic_qubit_pairs(data_patch, ancilla_patch, builder)  # validates global patches + parent
+        circuit = homomorphic_cnot_circuit(pairs, ancilla_patch.puncture.control)
+        if len(circuit):
+            builder.apply_unitary_block(circuit, noiseless=noiseless)
+        return circuit
+
+
+def register_hgp_op_set(executor, op_set: Optional[HGPCodeLogicalOpSet] = None,
+                        extraction_block_class: Optional[Type] = None) -> HGPCodeLogicalOpSet:
+    """Register one :class:`HGPCodeLogicalOpSet` for ``HGPCode`` and ``PuncturedHGPCode``.
+
+    ``LogicalExecutor.apply_logical_operation`` looks the op set up by the
+    exact class of the first patch; punctured ancillas are a subclass, so
+    they need their own entry.  Returns the registered op set.
+    """
+    if op_set is None:
+        op_set = HGPCodeLogicalOpSet(extraction_block_class=extraction_block_class)
+    executor.register_op_set(HGPCode, op_set)
+    executor.register_op_set(PuncturedHGPCode, op_set)
+    return op_set
+
 
 __all__ = [
     "HGPCodeLogicalOpSet",
@@ -307,4 +399,5 @@ __all__ = [
     "fold_mirror_pairs",
     "fold_swap_layer_circuit",
     "is_symmetric_hgp",
+    "register_hgp_op_set",
 ]
