@@ -18,11 +18,11 @@ from lightstim.ir.qec_system import QECSystem
 from lightstim.ir.tracker import SyndromeTracker
 from lightstim.noise.config import NoiseConfig
 from lightstim.protocols.hgp_logical_gates import build_hgp_gate_verification_circuit
-from lightstim.qec_code.generic_css import GenericCSSColorationExtractionBlock
 from lightstim.qec_code.HGP import (
     BinaryParityCheck,
     HGPCode,
     HGPCodeLogicalOpSet,
+    HGPProductColorationExtractionBlock,
     fold_diagonal_qubits,
     fold_h_layer_circuit,
     fold_h_swap_circuit,
@@ -518,9 +518,8 @@ def test_two_patch_system_gate_on_one_patch_leaves_the_other_alone():
     data = sorted(system.data_indices)
     builder.initialize({q: "Z" for q in data}, system.num_qubits)
     system.active_qubit_indices.update(data)
-    # The product-coloration block serves one HGP patch; two patches use the
-    # generic CSS coloration block.
-    se_block = GenericCSSColorationExtractionBlock(system)
+    # System-wide product coloration schedules both HGP patches in one round.
+    se_block = HGPProductColorationExtractionBlock(system)
     blocks = getattr(se_block, "measurement_blocks", None)
     builder.apply_syndrome_extraction(se_block.circuit, rounds=2, measurement_blocks=blocks)
 

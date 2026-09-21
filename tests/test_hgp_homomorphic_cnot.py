@@ -23,6 +23,7 @@ from lightstim.qec_code.HGP import (
     BinaryParityCheck,
     HGPCode,
     HGPCodeLogicalOpSet,
+    HGPProductColorationExtractionBlock,
     PuncturedHGPCode,
     hgp_13_1_3,
     hgp_18_2_3,
@@ -493,10 +494,11 @@ def test_executor_runs_the_nested_fig_2a_steps_with_register_hgp_op_set():
 # End to end: two patches, SE, homomorphic CNOT, readout
 # ---------------------------------------------------------------------------
 
-def _end_to_end(factory, axis, delete, basis, rounds=2, noise=None):
+def _end_to_end(factory, axis, delete, basis, rounds=2, noise=None,
+                block_class=GenericCSSColorationExtractionBlock):
     system, data, ancilla = _two_patch_system(factory, axis, delete)
     builder = _builder_for(system)
-    se_block = GenericCSSColorationExtractionBlock(system)
+    se_block = block_class(system)
     blocks = getattr(se_block, "measurement_blocks", None)
     data_qubits = sorted(system.data_indices)
     builder.initialize({q: basis for q in data_qubits}, system.num_qubits)
@@ -515,13 +517,16 @@ def _end_to_end(factory, axis, delete, basis, rounds=2, noise=None):
     return circuit, data, ancilla
 
 
+@pytest.mark.parametrize("block_class", [GenericCSSColorationExtractionBlock, HGPProductColorationExtractionBlock],
+                         ids=["generic", "product"])
 @pytest.mark.parametrize("name", ["hgp_225_9_4", "hgp_18_2_3", "hamming_redundant2"])
 @pytest.mark.parametrize("axis,basis", [("horizontal", "Z"), ("vertical", "X")])
-def test_end_to_end_noiseless_with_both_blocks_read_out(name, axis, basis):
-    """Z-type use (horizontal puncture, |0> ancilla) and X-type use (vertical, |+> ancilla)."""
+def test_end_to_end_noiseless_with_both_blocks_read_out(name, axis, basis, block_class):
+    """Z-type use (horizontal puncture, |0> ancilla) and X-type use (vertical, |+> ancilla),
+    with the generic and the system-wide product-coloration extraction blocks."""
     factory = CASES[name]
     delete = _deletions(factory, axis)[-1]
-    circuit, data, ancilla = _end_to_end(factory, axis, delete, basis)
+    circuit, data, ancilla = _end_to_end(factory, axis, delete, basis, block_class=block_class)
     assert circuit.num_observables == data.num_logicals + ancilla.num_logicals
     assert_noiseless(circuit)
 
