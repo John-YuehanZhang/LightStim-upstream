@@ -5,6 +5,31 @@ with Homological Product Codes" (arXiv:2407.18490), whose Table I lists the
 HGP gadgets used for logical computation.  Each gadget is transcribed here
 with its paper rule; deviations from the paper are stated explicitly.
 
+What these gates are, and what they are not
+-------------------------------------------
+* ``fold_transversal_h_swap`` is the H-SWAP gate.  It is not a logical
+  Hadamard: its logical action is H̄ on every logical qubit together with
+  the transposition Q̄_{i,j} <-> Q̄_{j,i} of the logical grid.  Only the
+  diagonal logical qubits (i = j) receive a plain H̄; every other logical
+  qubit receives H̄ and is moved to its mirror position.
+
+* ``fold_transversal_cz_s`` is the CZ-S gate.  It is not a logical S gate
+  (and not a logical CZ either): its logical action is S̄ on the diagonal
+  logical qubits Q̄_{i,i} together with CZ̄ on every mirror pair
+  (Q̄_{i,j}, Q̄_{j,i}).  On a code whose seed has redundant checks, the
+  C1xC2 diagonal logical qubits receive S̄† instead.
+
+References
+    [1] N. P. Breuckmann and S. Burton, Fold-transversal Clifford gates
+        for quantum codes, Quantum 8, 1372 (2024).
+    [2] A. O. Quintavalle, P. Webster, and M. Vasmer, Partitioning qubits
+        in hypergraph product codes to implement logical gates, Quantum 7,
+        1153 (2023).
+    [3] Q. Xu, H. Zhou, G. Zheng, D. Bluvstein, J. P. Bonilla Ataides,
+        M. D. Lukin, and L. Jiang, Fast and parallelizable logical
+        computation with homological product codes, Phys. Rev. X 15,
+        021065 (2025).
+
 Fold-transversal H-SWAP (Table I; introduced in Ref. [27] of the paper,
 Quintavalle-Webster-Vasmer, under the fold-transversal framework of Ref. [26],
 Breuckmann-Burton)
