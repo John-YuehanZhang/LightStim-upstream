@@ -18,6 +18,7 @@ from lightstim.ir.qec_system import QECSystem
 from lightstim.ir.tracker import SyndromeTracker
 from lightstim.noise.config import NoiseConfig
 from lightstim.protocols.hgp_logical_gates import build_hgp_gate_verification_circuit
+from lightstim.qec_code.generic_css import GenericCSSColorationExtractionBlock
 from lightstim.qec_code.HGP import (
     BinaryParityCheck,
     HGPCode,
@@ -83,6 +84,17 @@ def _records(patch):
 def _layer(patch, system, dagger=False):
     vv, cc = fold_diagonal_qubits_by_sector(patch, _SystemOnly(system))
     return fold_cz_s_circuit(vv, cc, fold_mirror_pairs(patch, _SystemOnly(system)), dagger=dagger)
+
+
+def _raw_observable_parity(circuit, shots=64, seed=1):
+    """Raw measurement parity of every OBSERVABLE_INCLUDE (no reference subtraction)."""
+    raw = circuit.compile_sampler(seed=seed).sample(shots)
+    columns = []
+    for inst in circuit.flattened():
+        if inst.name == "OBSERVABLE_INCLUDE":
+            recs = [circuit.num_measurements + t.value for t in inst.targets_copy()]
+            columns.append(np.bitwise_xor.reduce(raw[:, recs], axis=1))
+    return np.array(columns).T
 
 
 def _symplectic(pauli, n):
@@ -364,6 +376,18 @@ def test_harness_cz_s_round_trip_restores_x_logicals(name):
     _, patch = _global_patch(INSTANCES[name])
     assert circuit.num_observables == patch.num_logicals
     assert_noiseless(circuit)
+    # Signs: CZ-S·CZ-S† is the identity, so no logical Pauli is left behind
+    # (CZ-S·CZ-S = S̄² = Z̄ on the diagonal would flip X̄, invisible to the
+    # detector sampler but visible in the raw parity).
+    assert not _raw_observable_parity(circuit).any()
+
+
+def test_harness_cz_s_twice_leaves_a_logical_z_on_the_diagonal():
+    circuit = build_quiet(lambda: build_hgp_gate_verification_circuit(
+        hgp_13_1_3(), [(CZS, {}), (CZS, {})], init_basis="X", measure_basis="X"))
+    assert circuit.num_observables == 1
+    assert_noiseless(circuit)                              # deterministic ...
+    assert _raw_observable_parity(circuit).all()           # ... but X̄ -> −X̄
 
 
 def test_harness_single_cz_s_on_x_init_leaves_nothing_x_resolvable_for_k1():
@@ -379,6 +403,61 @@ def test_cz_s_composes_with_h_swap():
         hgp_225_9_4(), [(HS, {}), (CZS, {}), (CZS_DAG, {}), (HS, {})], init_basis="Z", measure_basis="Z"))
     assert circuit.num_observables == 9
     assert_noiseless(circuit)
+    assert not _raw_observable_parity(circuit).any()
+
+
+# ---------------------------------------------------------------------------
+# Multi-patch / offset: the gate acts on one patch only, with global indices
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("op_name", [CZS, CZS_DAG])
+def test_two_patch_system_gate_on_one_patch_leaves_the_other_alone(op_name):
+    """Patch b sits at a non-zero offset, so local and global indices differ."""
+    system = QECSystem()
+    patch_a = system.add_patch(hgp_18_2_3(), name="a")
+    patch_b = system.add_patch(hgp_18_2_3(), offset=(20, 0), name="b")
+    tracker = SyndromeTracker(num_qubits=system.num_qubits, expected_num_logicals=system.num_logicals)
+    builder = CircuitBuilder(tracker=tracker, system_config=system, if_detector=True)
+    system.register_tracker(tracker)
+    system.register_builder(builder)
+    builder.write_coordinates()
+    data = sorted(system.data_indices)
+    builder.initialize({q: "Z" for q in data}, system.num_qubits)
+    system.active_qubit_indices.update(data)
+    se_block = GenericCSSColorationExtractionBlock(system)
+    blocks = getattr(se_block, "measurement_blocks", None)
+    builder.apply_syndrome_extraction(se_block.circuit, rounds=2, measurement_blocks=blocks)
+
+    emitted = getattr(HGPCodeLogicalOpSet(), op_name)(builder, patch_b)
+    touched = {t.value for inst in emitted.flattened() for t in inst.targets_copy()}
+    assert touched == set(patch_b.data_indices)
+    assert not touched & set(patch_a.data_indices)
+    # The S/S† targets are patch b's diagonals and the CZ targets its mirror pairs, in global indices.
+    vv, cc = fold_diagonal_qubits_by_sector(patch_b, builder)
+    names = {inst.name: sorted(t.value for t in inst.targets_copy()) for inst in emitted.flattened() if inst.name != "TICK"}
+    assert names["S_DAG" if op_name == CZS_DAG else "S"] == sorted(vv)
+    assert names["S" if op_name == CZS_DAG else "S_DAG"] == sorted(cc)
+    assert names["CZ"] == sorted(q for pair in fold_mirror_pairs(patch_b, builder) for q in pair)
+
+    before = builder.circuit.num_detectors
+    builder.apply_syndrome_extraction(se_block.circuit, rounds=2, measurement_blocks=blocks)
+    assert builder.circuit.num_detectors - before == 2 * (len(patch_a.stabilizers) + len(patch_b.stabilizers))
+    builder.apply_data_readout({q: "Z" for q in data})     # Z̄ is fixed by CZ-S on both patches
+    assert builder.circuit.num_observables == 4
+    assert_noiseless(builder.circuit)
+    assert not _raw_observable_parity(builder.circuit).any()
+
+
+def test_exact_action_at_a_non_zero_offset():
+    system = QECSystem()
+    patch = system.add_patch(hgp_225_9_4(), offset=(7, 11), name="hgp")
+    n = system.num_qubits
+    tableau = _padded_tableau(_layer(patch, system), n)
+    records = _records(patch)
+    for logical_id, (kind, partner) in fold_logical_cz_s_action(patch).items():
+        x, z = _pauli(n, records[logical_id]["X"], "X"), _pauli(n, records[logical_id]["Z"], "Z")
+        expected = x * _pauli(n, records[partner]["Z"], "Z") if kind == "CZ" else (x * z) * 1j
+        assert tableau(x) == expected and tableau(z) == z
 
 
 def _circuit_level_distance(circuit):
