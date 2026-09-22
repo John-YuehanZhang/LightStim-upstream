@@ -64,6 +64,53 @@ Deviations / choices.
   product in either order.
 * No Pauli frame is involved: the logical action is exactly H̄^{⊗k} · SWAP,
   with no residual logical Pauli.
+
+Fold-transversal CZ-S (Table I; same origin as the H-SWAP)
+--------------------------------------------------------------------------
+Paper rule.  For a symmetric HGP code (H1 = H2), with ``O+`` as above and
+``n1 + 1 → 2n1 − k1`` the C1 x C2 diagonal:
+
+    physical:  (⊗_{i∈[n1]} S(Q_{i,i})) · (⊗_{i∈{n1+1→2n1−k1}} S†(Q_{i,i}))
+               · ⊗_{(i,j)∈O+} CZ(Q_{i,j}, Q_{j,i})
+    logical:   (⊗_{i∈[k1]} S̄(Q̄_{i,i})) · ⊗_{(i,j)∈Ō+} CZ̄(Q̄_{i,j}, Q̄_{j,i})
+
+Time cost O(1); no ancilla.  Every gate acts on the diagonal or on one
+mirror pair, so a single fault stays on at most one mirror pair.
+
+Transcription.  S on the V1 x V2 diagonal ``(bit, bit)``, S† on the C1 x C2
+diagonal ``(check, check)``, CZ on every mirror pair of both sectors (the
+pairs of :func:`fold_mirror_pairs`).  Under this layer
+
+    X on (r, c)  ↦  X on (r, c) · Z on (c, r)      (phase i on the V1xV2
+                                                   diagonal, −i on the C1xC2
+                                                   diagonal),
+    Z            ↦  Z,
+
+so an X check ``(bit_1, check_2)`` maps to itself times the Z check
+``(check_2, bit_1)``; its support meets the two diagonals on the same
+condition ``H[check_2, bit_1] = 1``, and the phases ``i · (−i) = 1`` cancel.
+That cancellation is why the paper puts S† on the C1 x C2 diagonal.  Z
+checks are fixed.  In the canonical basis, for V1 x V2 logical pairs:
+
+    X̄ of pair (l1, l2), l1 ≠ l2  ↦  X̄(l1, l2) · Z̄(l2, l1)   exactly (CZ̄ with
+                                                               the mirror pair)
+    X̄ of pair (l, l)             ↦  +Ȳ(l, l)                exactly (S̄)
+    Z̄                            ↦  Z̄
+
+The kernel vector of ``l1`` has a 1 on its own pivot only, so a logical
+support meets the diagonal exactly when ``l1 == l2``; the tests check
+these identities with stim tableaux.
+
+Beyond the paper.  C1 x C2 logical pairs (rank-deficient seeds) see the
+S† diagonal instead, so their diagonal pairs receive S̄† (image −Ȳ) while
+their mirror pairs still receive CZ̄.  ``fold_transversal_cz_s_dag`` is
+the inverse layer (S†/S exchanged, CZ unchanged) and is the S̄† gate on
+V1 x V2 diagonal pairs.
+
+Deviations / choices.  The CZ layer is emitted as physical ``CZ`` gates,
+which take the two-qubit gate noise of the noise model; unlike the SWAP
+of the H-SWAP there is no relabelling reading of a CZ, so no noiseless
+option is offered beyond ``noiseless``.
 """
 
 from __future__ import annotations
@@ -104,7 +151,7 @@ def is_symmetric_hgp(patch: HGPCode) -> bool:
 def _require_symmetric(patch: HGPCode) -> None:
     if not is_symmetric_hgp(patch):
         raise ValueError(
-            "The fold-transversal H-SWAP needs a symmetric HGP code (H1 = H2, "
+            "The fold-transversal gates (H-SWAP, CZ-S) need a symmetric HGP code (H1 = H2, "
             "Xu et al. Table I); this patch has "
             f"H1 of shape {patch.h1.shape} and H2 of shape {patch.h2.shape}"
             + ("" if patch.h1.shape != patch.h2.shape else " with different entries")
@@ -173,6 +220,16 @@ def fold_diagonal_qubits(patch: HGPCode, builder: Optional[CircuitBuilder] = Non
     return diagonal
 
 
+def fold_diagonal_qubits_by_sector(
+    patch: HGPCode, builder: Optional[CircuitBuilder] = None
+) -> Tuple[List[int], List[int]]:
+    """Return ``(V1xV2 diagonal, C1xC2 diagonal)`` data qubits (global with a builder)."""
+    _check_patch(patch, builder)
+    vv = [_global_index(builder, patch, q) for (a, b), q in sorted(patch.vv_qubits.items()) if a == b]
+    cc = [_global_index(builder, patch, q) for (a, b), q in sorted(patch.cc_qubits.items()) if a == b]
+    return vv, cc
+
+
 def fold_logical_permutation(patch: HGPCode) -> Dict[int, int]:
     """Return ``{logical_id: mirror logical_id}`` induced by the fold.
 
@@ -201,6 +258,47 @@ def fold_logical_permutation(patch: HGPCode) -> Dict[int, int]:
 # ---------------------------------------------------------------------------
 # Circuits
 # ---------------------------------------------------------------------------
+
+def fold_cz_s_circuit(
+    vv_diagonal: List[int], cc_diagonal: List[int], mirror_pairs: List[IndexPair], dagger: bool = False
+) -> stim.Circuit:
+    """Physical CZ-S: S on the V1xV2 diagonal, S† on the C1xC2 diagonal, TICK, CZ on mirror pairs.
+
+    ``dagger=True`` exchanges S and S† (the inverse layer, CZ unchanged).
+    """
+    circuit = stim.Circuit()
+    first, second = ("S_DAG", "S") if dagger else ("S", "S_DAG")
+    if vv_diagonal:
+        circuit.append(first, sorted(int(q) for q in vv_diagonal))
+    if cc_diagonal:
+        circuit.append(second, sorted(int(q) for q in cc_diagonal))
+    if mirror_pairs:
+        if len(circuit):
+            circuit.append("TICK")
+        circuit.append("CZ", [int(q) for pair in mirror_pairs for q in pair])
+    return circuit
+
+
+def fold_logical_cz_s_action(patch: HGPCode, dagger: bool = False) -> Dict[int, Tuple[str, Optional[int]]]:
+    """Logical action of the CZ-S layer (or its inverse) per logical id.
+
+    ``("S", None)`` for V1xV2 diagonal pairs, ``("S_DAG", None)`` for C1xC2
+    diagonal pairs, ``("CZ", partner_id)`` for the others (partner = mirror
+    pair of :func:`fold_logical_permutation`).  With ``dagger=True`` the
+    diagonal entries are exchanged (V1xV2 diagonal pairs get S̄†, C1xC2
+    diagonal pairs S̄); CZ̄ is its own inverse.
+    """
+    permutation = fold_logical_permutation(patch)
+    sector = {int(r["logical_id"]): r["sector"] for r in patch.logical_pairs}
+    action: Dict[int, Tuple[str, Optional[int]]] = {}
+    for logical_id, mirror in permutation.items():
+        if mirror == logical_id:
+            s_here = (sector[logical_id] == "bit_bit") != dagger
+            action[logical_id] = ("S" if s_here else "S_DAG", None)
+        else:
+            action[logical_id] = ("CZ", mirror)
+    return action
+
 
 def fold_h_layer_circuit(data_qubits: List[int]) -> stim.Circuit:
     """The transversal layer ``H^{⊗n}`` of the H-SWAP on ``data_qubits``."""
@@ -236,10 +334,12 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
     """Logical operation set for :class:`HGPCode` patches.
 
     Inherits ``transversal_cnot`` (between two identical patches) from
-    :class:`CSSLogicalOpSet` and adds the fold-transversal H-SWAP of a
+    :class:`CSSLogicalOpSet` and adds the fold-transversal gates of a
     symmetric HGP code (module docstring)::
 
         executor.apply_logical_operation("fold_transversal_h_swap", [patch])
+        executor.apply_logical_operation("fold_transversal_cz_s", [patch])
+        executor.apply_logical_operation("fold_transversal_cz_s_dag", [patch])
 
     ``patch`` must be the global patch returned by ``QECSystem.add_patch``.
 
@@ -297,12 +397,69 @@ class HGPCodeLogicalOpSet(CSSLogicalOpSet):
             builder.apply_unitary_block(swap_layer, noiseless=(noiseless or not noisy_swap))
         return fold_h_swap_circuit(data_qubits, mirror_pairs)
 
+    def fold_transversal_cz_s(
+        self, builder: CircuitBuilder, patch: QECPatch, noiseless: bool = False
+    ) -> stim.Circuit:
+        """Apply the fold-transversal CZ-S layer to ``patch`` (module docstring).
+
+        Logical action (exact): S̄ on every V1xV2 diagonal logical pair,
+        S̄† on every C1xC2 diagonal pair, CZ̄ on every mirror pair of logical
+        qubits; see :func:`fold_logical_cz_s_action`.  The tracker follows
+        the symplectic part of the physical Clifford; signs (the Pauli
+        frame, e.g. S̄² = Z̄ sending X̄ to −X̄) are not tracked, so they show
+        up in raw measurement parities but not in detector-sampler flips.
+
+        Args:
+            builder: CircuitBuilder driving the experiment.
+            patch: Global symmetric HGPCode patch (``system.add_patch``).
+            noiseless: If True, tag both layers (S/S† and CZ) as noiseless.
+
+        Returns:
+            The appended circuit, i.e. :func:`fold_cz_s_circuit` on this
+            patch's global indices (without ``noiseless`` tags).
+        """
+        return self._apply_cz_s(builder, patch, noiseless=noiseless, dagger=False)
+
+    def fold_transversal_cz_s_dag(
+        self, builder: CircuitBuilder, patch: QECPatch, noiseless: bool = False
+    ) -> stim.Circuit:
+        """Inverse of :meth:`fold_transversal_cz_s` (S and S† exchanged, CZ unchanged).
+
+        Logical action: S̄† on V1xV2 diagonal pairs, S̄ on C1xC2 diagonal
+        pairs, CZ̄ on mirror pairs (``fold_logical_cz_s_action(patch, dagger=True)``).
+        """
+        return self._apply_cz_s(builder, patch, noiseless=noiseless, dagger=True)
+
+    def _apply_cz_s(self, builder, patch, *, noiseless: bool, dagger: bool) -> stim.Circuit:
+        vv_diagonal, cc_diagonal = fold_diagonal_qubits_by_sector(patch, builder)  # validates
+        mirror_pairs = fold_mirror_pairs(patch, builder)
+        data = set(int(q) for q in patch.data_indices)
+        if not (set(vv_diagonal) | set(cc_diagonal) | {q for p in mirror_pairs for q in p}) <= data:
+            raise RuntimeError("Fold qubits are not data qubits of this patch.")
+        circuit = fold_cz_s_circuit(vv_diagonal, cc_diagonal, mirror_pairs, dagger=dagger)
+        # Two blocks so the noise model sees the single-qubit layer and the
+        # CZ layer as separate moments, like the H-SWAP.
+        phase_layer = stim.Circuit()
+        cz_layer = stim.Circuit()
+        for inst in circuit:
+            if inst.name == "TICK":
+                continue
+            (cz_layer if inst.name == "CZ" else phase_layer).append(inst)
+        if len(phase_layer):
+            builder.apply_unitary_block(phase_layer, noiseless=noiseless)
+        if len(cz_layer):
+            builder.apply_unitary_block(cz_layer, noiseless=noiseless)
+        return circuit
+
 
 __all__ = [
     "HGPCodeLogicalOpSet",
+    "fold_cz_s_circuit",
     "fold_diagonal_qubits",
+    "fold_diagonal_qubits_by_sector",
     "fold_h_layer_circuit",
     "fold_h_swap_circuit",
+    "fold_logical_cz_s_action",
     "fold_logical_permutation",
     "fold_mirror_pairs",
     "fold_swap_layer_circuit",
