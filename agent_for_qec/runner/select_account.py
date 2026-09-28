@@ -21,6 +21,10 @@ from pathlib import Path
 STATE_DIR = Path("/nvme2n1/yuehan_zhang/agent_for_qec_runner")
 TOKENS = Path("/nvme2n1/yuehan_zhang/.secrets/claude_oauth_tokens.txt")
 PROBE_CACHE_MIN = 30
+# Accounts that still have Fable quota are reserved for Fable phases: when
+# running any other model they sort last (used only if nothing else has quota).
+RESERVE_FOR_FABLE = {"acct2", "acct7"}
+FABLE_MODELS = {"claude-fable-5-1", "fable"}
 
 
 def load_tokens():
@@ -92,7 +96,9 @@ def main():
     if not eligible:
         print("NO_ACCOUNT_AVAILABLE", file=sys.stderr)
         sys.exit(1)
-    eligible.sort(key=lambda l: (usage_since(usage_file, l, 5 * 3600), usage_since(usage_file, l, 7 * 86400), l))
+    reserve_penalty = (lambda l: l in RESERVE_FOR_FABLE) if a.model not in FABLE_MODELS else (lambda l: False)
+    eligible.sort(key=lambda l: (reserve_penalty(l), usage_since(usage_file, l, 5 * 3600),
+                                 usage_since(usage_file, l, 7 * 86400), l))
     print(eligible[0])
 
 
