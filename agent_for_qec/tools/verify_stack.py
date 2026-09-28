@@ -232,18 +232,25 @@ def min_weight_vector_milp(H: np.ndarray, L: np.ndarray, *, weight_of=None,
             if best is None or w < best[0]:
                 best = (w, sol)
             status = "exact" if status != "timeout" else status
-        elif res.status == 1:  # time limit
+            row_lb = w
+        elif res.status == 1:  # time limit: keep incumbent + dual bound
             status = "timeout"
             if res.x is not None:
                 w = int(round(res.fun)); sol = [i for i in range(n) if res.x[i] > 0.5]
                 if best is None or w < best[0]:
                     best = (w, sol)
-        # status 2 = infeasible for this row -> fine, other rows may work
+            db = getattr(res, "mip_dual_bound", None)
+            row_lb = int(math.ceil(db - 1e-6)) if db is not None and np.isfinite(db) else 0
+        else:
+            row_lb = None  # infeasible for this row: no constraint on the minimum
+        if row_lb is not None:
+            proven = row_lb if proven == 0 else min(proven, row_lb)
+    # proven = min over logical rows of each row's lower bound = lower bound on the distance
     if best is None:
-        return MinWeightResult(None, None, 0, status, time.time() - t0)
+        return MinWeightResult(None, None, max(proven - 1, 0), status, time.time() - t0)
     if status == "exact":
         return MinWeightResult(best[0], best[1], best[0] - 1, "exact", time.time() - t0)
-    return MinWeightResult(None, best[1], 0, "timeout", time.time() - t0)
+    return MinWeightResult(None, best[1], max(proven - 1, 0), "timeout", time.time() - t0)
 
 
 # --------------------------------------------------------------------------- #
@@ -426,14 +433,13 @@ def circuit_distance(noisy_circuit: stim.Circuit, *, observables: Optional[Seque
     res.search_error = search_error
     if exact:
         r = min_weight_vector_milp(H, L, time_limit_s=timeout_s)
-        if r.status != "exact" and z3 is not None and (time.time() - t0) < timeout_s:
-            r2 = min_weight_vector(H, L, upper_bound=sw, timeout_s=max(30.0, timeout_s - (time.time() - t0)))
-            if r2.status == "exact":
-                r = r2
         res.exact_weight = r.weight
         res.proven_lower_bound = r.proven_lower_bound
         res.status = r.status
         res.witness = r.witness
+        if r.status == "timeout" and r.witness is not None:
+            # incumbent from the MILP is a valid witness -> upper bound
+            res.search_weight = min(sw, len(r.witness)) if sw is not None else len(r.witness)
     res.seconds = time.time() - t0
     return res
 

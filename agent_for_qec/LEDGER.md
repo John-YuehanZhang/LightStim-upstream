@@ -8,11 +8,11 @@
 
 | id | 码 [[n,k,d]] | 逻辑操作 | 实现方式 | 码距离(精确) | 电路级距离(精确, d=3/5/7) | 满距离 | 逻辑作用(签名flow) | 平台分析 | 来源 | 先前工作 / 说明 | 类别 | 日期 | 证据 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C-001 | 旋转表面码 [[d²,1,d]] | 记忆, Z 基 | `RotatedSurfaceCodeExtractionBlock(scheduling='perpendicular')` | 3/5/7 | 3/5/(待) | 是 | n/a | 2D 近邻, 0 非局域两比特门 | 人工校准 | 标准 FT 调度 | 校准 | 2026-09-28 | `phase0/schedule_calibration.{py,out}` |
-| C-002 | 同上 | 记忆, X 基 | 同上 | 3/5/7 | 3/5/(待) | 是 | n/a | 同上 | 人工校准 | 同上 | 校准 | 2026-09-28 | 同上 |
+| C-001 | 旋转表面码 [[d²,1,d]] | 记忆, Z 基 | `RotatedSurfaceCodeExtractionBlock(scheduling='perpendicular')` | 3/5/7 | 3/5/(d=7 MILP 1500s 超时未证) | 是(d≤5) | n/a | 2D 近邻, 0 非局域两比特门 | 人工校准 | 标准 FT 调度; d=7 待用更长时限或更好求解器补证 | 校准 | 2026-09-28 | `phase0/schedule_calibration.{py,out}` |
+| C-002 | 同上 | 记忆, X 基 | 同上 | 3/5/7 | 3/5/(同上超时) | 是(d≤5) | n/a | 同上 | 人工校准 | 同上 | 校准 | 2026-09-28 | 同上 |
 | C-003 | 同上 | 记忆, Z 基 | `scheduling='swapped'` | 3/5/– | 2/3/– | **否** | n/a | 同上 | 人工校准 | 两种 stabilizer 的 hook 方向都与其威胁的逻辑算子平行, 待 Phase 0 用 witness 解释 | 校准 | 2026-09-28 | 同上 |
 | C-004 | 同上 | 记忆, X 基 | `scheduling='swapped'` | 3/5/– | 2/3/– | **否** | n/a | 同上 | 人工校准 | 同上 | 校准 | 2026-09-28 | 同上 |
 | C-005 | 同上 | 记忆, Z 基 | `scheduling='parallel'` | 3/5/– | 3/5/– | 是 | n/a | 同上 | 人工校准 | 文档写"非 FT", 但 Z 基满距离 | 校准 | 2026-09-28 | 同上 |
 | C-006 | 同上 | 记忆, X 基 | `scheduling='parallel'` | 3/5/– | 2/3/– | **否** | n/a | 同上 | 人工校准 | X 基掉到 (d+1)/2 | 校准 | 2026-09-28 | 同上 |
-| C-007 | 同上 | 记忆, Z 基 | `GenericCSSColorationExtractionBlock`（MemoryExperiment 的默认块） | 3/5/7 | 3/3/(待) | **否** | n/a | 同上 | 人工校准 | 边染色排序不管 hook 方向; d=5 witness 是 tick 3 的三个 DEPOLARIZE2 含 Y 型 hook | 校准 | 2026-09-28 | 同上 |
-| C-008 | 同上 | 记忆, X 基 | 同上 | 3/5/7 | 3/3/(待) | **否** | n/a | 同上 | 人工校准 | 同上 | 校准 | 2026-09-28 | 同上 |
+| C-007 | 同上 | 记忆, Z 基 | `GenericCSSColorationExtractionBlock`（MemoryExperiment 的默认块） | 3/5/7 | 3/3/5 | **否** | n/a | 同上 | 人工校准 | 边染色排序不管 hook 方向; d=5 witness 是 tick 3 的三个 DEPOLARIZE2 含 Y 型 hook; d≥5 距离 = d−2 | 校准 | 2026-09-28 | 同上 |
+| C-008 | 同上 | 记忆, X 基 | 同上 | 3/5/7 | 3/3/5 | **否** | n/a | 同上 | 人工校准 | 同上 | 校准 | 2026-09-28 | 同上 |
