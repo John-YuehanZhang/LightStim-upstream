@@ -5,7 +5,7 @@ from lightstim.protocols.memory import MemoryExperiment
 from lightstim.noise.config import NoiseConfig
 from agent_for_qec.v2.helpers import patch_block, patch_logicals, flow
 
-SCHED = 'swapped'
+SCHED = 'perpendicular'
 
 def build():
     p = 1e-3

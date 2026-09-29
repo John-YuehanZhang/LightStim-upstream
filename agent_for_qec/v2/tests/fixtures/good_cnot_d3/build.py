@@ -1,22 +1,25 @@
-"""Calibration fixture: transversal CNOT between two d=3 rotated surface codes (full-distance SE)."""
-import functools, sys
-sys.path.insert(0, "agent_for_qec/phase0")
-from cnot_trans_verify import build as build_exp, logical_segment, patch_logicals
-sys.path.insert(0, "agent_for_qec/tools")
-from verify_stack import logical_flow_string
+"""Transversal CNOT between two d=3 rotated surface codes, perpendicular SE."""
+import functools
 from lightstim.qec_code.surface_code.rotated.code_patch import RotatedSurfaceCode
+from lightstim.qec_code.surface_code.rotated.SE_block import RotatedSurfaceCodeExtractionBlock
+from lightstim.protocols.cnot_trans import CNOTTransExperiment
+from lightstim.noise.config import NoiseConfig
+from agent_for_qec.v2.helpers import patch_block, patch_logicals, flow
 
-D = 3
-SIGN = +1
+D, SIGN = 3, +1
 
 def build():
-    exp, c = build_exp(D, 'Z', 'Z', 'Z', 'Z', D)
-    data = sorted(exp.system.data_indices)
-    seg = logical_segment(c, set(data))
+    p = 1e-3
+    exp = CNOTTransExperiment(code_patch_class=RotatedSurfaceCode,
+                              extraction_block_class=functools.partial(RotatedSurfaceCodeExtractionBlock, scheduling='perpendicular'),
+                              code_params_control={'distance': D}, offset_target=(2 * D + 2, 0),
+                              initial_basis_control='Z', initial_basis_target='Z', measure_basis_control='Z',
+                              measure_basis_target='Z', rounds_before=D, rounds_after=D,
+                              noise_params=NoiseConfig(p_1q=p, p_2q=p, p_meas=p, p_reset=p, p_idle=p), noise_model='circuit_level')
+    c = exp.build()
     lc, lt = patch_logicals(exp.system, 'control'), patch_logicals(exp.system, 'target')
-    flows = [logical_flow_string(lc['X'], {**lc['X'], **lt['X']}, sign=SIGN),
-             logical_flow_string(lt['Z'], {**lc['Z'], **lt['Z']}),
-             logical_flow_string(lt['X'], lt['X']),
-             logical_flow_string(lc['Z'], lc['Z'])]
+    flows = [flow(lc['X'], {**lc['X'], **lt['X']}, sign=SIGN), flow(lt['Z'], {**lc['Z'], **lt['Z']}),
+             flow(lt['X'], lt['X']), flow(lc['Z'], lc['Z'])]
     return {"code": {"patch": RotatedSurfaceCode(distance=D)},
-            "circuits": {"cnot_ZZ": {"circuit": c, "data_qubits": data, "flow_circuit": seg, "flows": flows}}}
+            "circuits": {"cnot_ZZ": {"circuit": c, "blocks": [patch_block(exp.system, 'control'), patch_block(exp.system, 'target')],
+                                     "flows": flows}}}

@@ -110,7 +110,8 @@ class Store:
         self.project = project
         self.dir = project_dir(project)
         self.db_path = self.dir / "store.sqlite"
-        self.con = sqlite3.connect(self.db_path, timeout=60)
+        self.con = sqlite3.connect(self.db_path, timeout=300)
+        self.con.execute("PRAGMA journal_mode=WAL")
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
         self.con.commit()
@@ -132,6 +133,8 @@ class Store:
                    refs: Optional[List[str]] = None, extra: Optional[dict] = None) -> int:
         if kind not in MEMORY_KINDS:
             raise ValueError(f"unknown memory kind {kind!r}; allowed: {sorted(MEMORY_KINDS)}")
+        if not claim or not claim.strip():
+            raise ValueError("empty claim")
         cur = self.con.execute(
             "INSERT INTO memory(kind,author,created,round,claim,evidence,refs,extra) VALUES(?,?,?,?,?,?,?,?)",
             (kind, author, time.time(), self.current_round(), claim, evidence,
@@ -160,20 +163,36 @@ class Store:
     # ------------------------------------------------------------ facts
     def add_fact(self, fact_id: str, kind: str, title: str, claims: dict, verdict: dict,
                  depends_on: List[str], submission_id: str, author: str, origin: str = "agent") -> None:
+        """Insert a new fact. Never overwrites: an existing id (active or revoked) is an error."""
         for dep in depends_on:
-            r = self.fact(dep)
+            r = self.fact(dep, exact=True)
             if r is None or r["status"] != "active":
                 raise ValueError(f"dependency {dep} is missing or revoked")
-        self.con.execute(
-            "INSERT OR REPLACE INTO facts(id,kind,title,claims,verdict,depends_on,submission_id,author,created,origin)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (fact_id, kind, title, jdump(claims), jdump(verdict), jdump(depends_on),
-             submission_id, author, time.time(), origin))
-        self.con.commit()
+        with self.con:
+            self.con.execute(
+                "INSERT INTO facts(id,kind,title,claims,verdict,depends_on,submission_id,author,created,origin)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (fact_id, kind, title, jdump(claims), jdump(verdict), jdump(depends_on),
+                 submission_id, author, time.time(), origin))
 
-    def fact(self, fact_id: str) -> Optional[sqlite3.Row]:
-        rows = self.con.execute("SELECT * FROM facts WHERE id LIKE ?", (fact_id + "%",)).fetchall()
+    def fact(self, fact_id: str, exact: bool = False) -> Optional[sqlite3.Row]:
+        """Look up a fact by full id, or by an unambiguous prefix of at least 8 hex characters."""
+        if not fact_id or any(c not in "0123456789abcdef" for c in fact_id.lower()):
+            return None
+        if exact or len(fact_id) == 64:
+            return self.con.execute("SELECT * FROM facts WHERE id=?", (fact_id,)).fetchone()
+        if len(fact_id) < 8:
+            return None
+        rows = self.con.execute("SELECT * FROM facts WHERE substr(id,1,?)=?", (len(fact_id), fact_id.lower())).fetchall()
         return rows[0] if len(rows) == 1 else None
+
+    def resolve_fact_id(self, ref: str) -> str:
+        r = self.fact(ref)
+        if r is None:
+            raise ValueError(f"'{ref}' does not identify exactly one fact (use at least 8 hex characters)")
+        if r["status"] != "active":
+            raise ValueError(f"fact {r['id'][:12]} is revoked")
+        return r["id"]
 
     def facts(self, status: Optional[str] = "active") -> List[sqlite3.Row]:
         if status is None:
@@ -200,24 +219,29 @@ class Store:
         return done
 
     def set_review(self, fact_id: str, status: str, review: dict) -> None:
-        self.con.execute("UPDATE facts SET review_status=?, review=? WHERE id=?",
-                         (status, jdump(review), self.fact(fact_id)["id"]))
+        fid = self.resolve_fact_id(fact_id)
+        self.con.execute("UPDATE facts SET review_status=?, review=? WHERE id=?", (status, jdump(review), fid))
         self.con.commit()
 
     def set_novelty(self, fact_id: str, status: str, novelty: dict) -> None:
         if status == "human_confirmed_new":
             raise ValueError("only the human operator may set human_confirmed_new (use qec.py sign-new)")
-        self.con.execute("UPDATE facts SET novelty_status=?, novelty=? WHERE id=?",
-                         (status, jdump(novelty), self.fact(fact_id)["id"]))
+        fid = self.resolve_fact_id(fact_id)
+        self.con.execute("UPDATE facts SET novelty_status=?, novelty=? WHERE id=?", (status, jdump(novelty), fid))
         self.con.commit()
 
     # ------------------------------------------------------------ submissions
     def add_submission(self, sub_id: str, author: str, path: str, outcome: str, report: dict,
                        fact_id: Optional[str]) -> None:
         self.con.execute(
-            "INSERT OR REPLACE INTO submissions(id,author,created,path,outcome,report,fact_id) VALUES(?,?,?,?,?,?,?)",
-            (sub_id, author, time.time(), path, outcome, jdump(report), fact_id))
+            "INSERT INTO submissions(id,author,created,path,outcome,report,fact_id) VALUES(?,?,?,?,?,?,?)",
+            (f"{sub_id}:{time.time():.6f}", author, time.time(), path, outcome, jdump(report), fact_id))
         self.con.commit()
+
+    def submission(self, ref: str) -> Optional[sqlite3.Row]:
+        rows = self.con.execute("SELECT * FROM submissions WHERE substr(id,1,?)=? ORDER BY created DESC",
+                                (len(ref), ref)).fetchall()
+        return rows[0] if rows else None
 
     # ------------------------------------------------------------ assignments
     def assign(self, worker: str, text: str) -> None:
