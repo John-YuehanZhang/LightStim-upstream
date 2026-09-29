@@ -254,6 +254,15 @@ class Store:
     def open_assignments(self) -> List[sqlite3.Row]:
         return self.con.execute("SELECT * FROM assignments WHERE status='open' ORDER BY worker").fetchall()
 
+    def close_assignments(self, status: str, worker: Optional[str] = None) -> int:
+        """Set the status of open assignments (all, or one worker's): done | abandoned."""
+        q, args = "UPDATE assignments SET status=? WHERE status='open'", [status]
+        if worker is not None:
+            q, args = q + " AND worker=?", args + [worker]
+        n = self.con.execute(q, args).rowcount
+        self.con.commit()
+        return n
+
     def assignment(self, worker: str) -> Optional[sqlite3.Row]:
         return self.con.execute("SELECT * FROM assignments WHERE worker=? AND status='open' ORDER BY id DESC LIMIT 1",
                                 (worker,)).fetchone()

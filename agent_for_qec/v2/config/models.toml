@@ -50,3 +50,16 @@ small_fast_model = "deepseek-flash"
 [providers.openai]
 harness = "codex"
 key_file = "/nvme2n1/yuehan_zhang/.secrets/openai_api_key.txt"
+
+# Operator limits for the round loop (never shown to agents).
+[orchestrator]
+# workers per round = min(max_workers, accounts with quota for the worker model)
+max_workers = 6
+# relaunches of a worker whose process failed for a reason other than a usage limit
+max_relaunch = 2
+# attempts of the main agent per round before the loop stops
+main_attempts = 3
+# every agent process is pinned (taskset) to its own block of cores
+cpus_per_agent = 16
+cpu_first = 0
+cpu_slots = 8

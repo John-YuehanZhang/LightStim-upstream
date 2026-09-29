@@ -254,7 +254,7 @@ def build_in_sandbox(sub_dir: Path, work: Path, timeout_s: int = 3600) -> subpro
         pyenv = str(Path(PY).resolve().parents[1])
         cmd = sandbox.wrap_minimal(cmd, readonly=[pyenv, str(REPO), str(src)], writable=[str(out)], env=env,
                                    cwd=str(src), network=False)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)  # wrap_minimal uses --clearenv
     return subprocess.run(cmd, cwd=str(src), env=env, capture_output=True, text=True, timeout=timeout_s)
 
 

@@ -13,7 +13,8 @@ turn. Nobody will wake you up again in this process.
 
 ## Start here
 
-    {QEC} status                      # your open assignment, latest guidance, facts, recent memory
+    {QEC} status                      # latest guidance, facts, recent memory
+    {QEC} assignment                  # full text of your assignment
     {QEC} memory search --kind dead_end obstacle counterexample verification --limit 40
     {QEC} fact <id>                   # gate report of a fact you build on
 
@@ -22,11 +23,13 @@ gate's verification records before you start, so you do not repeat a failure
 that is already recorded.
 
 Your working directory is {WORKDIR}; put all scripts, outputs and submissions
-there. Run Python from the repository root {REPO} as
-`PYTHONPATH=. {PY} ...`. LightStim is in `lightstim/`; read `skills/SKILL.md`
-and the skill it routes you to before using an API you have not used. Useful
-checks while you work are in `agent_for_qec/tools/verify_stack.py` and
-`agent_for_qec/tools/circuit_distance_fast.py`, but only the gate decides.
+there (it is the only place you can write). Run Python as `{PY} script.py`; the
+repository {REPO} is on PYTHONPATH and read-only. LightStim is in
+`{REPO}/lightstim/`; read `{REPO}/skills/SKILL.md` and the skill it routes you
+to before using an API you have not used. Useful checks while you work are in
+`{REPO}/agent_for_qec/tools/verify_stack.py` and
+`{REPO}/agent_for_qec/tools/circuit_distance_fast.py`, but only the gate decides.
+If you need a new construction, write it in your working directory.
 
 ## How results become facts
 
@@ -35,7 +38,7 @@ with `build.py` and `submission.json` (format below) and run
 
     {QEC} submit <dir>
 
-The gate rebuilds everything in a fresh process and checks: exact code
+The gate rebuilds everything in a fresh sandboxed process and checks: exact code
 distance (P1), noiseless sanity and a deterministic detector error model (P2),
 every declared logical flow WITH sign (P3), and the exact circuit-level distance
 against your claim (P4). A rejection report contains the lightest undetected
@@ -66,20 +69,15 @@ points against the goal itself.
 
 - No web access while solving. Do not try to find out whether the problem has
   been solved before; that is audited separately once results exist.
-- Before submitting, check your candidate against the failure-mode list below
-  (you may use one subagent as an adversarial checker for this).
+- Before submitting, check your candidate against the failure-mode list below.
 - Return concrete constructions, circuits, numbers and gate reports. Do not
   record vague optimism or claims that an unchecked step is "routine".
-- At most two subagents at a time. Keep simulations at most 16 worker
-  processes. Wrap long commands in `timeout`.
+- Wrap long commands in `timeout`.
 - You are a one-shot process. Never end your turn while a background job is
   still running. A single tool call is limited to about 10 minutes: for longer
   computations start them with `nohup ... > {WORKDIR}/job.out 2>&1 &` writing a
   `.done` file at the end, then repeatedly call
   `timeout 550 bash -c 'until [ -f {WORKDIR}/job.done ]; do sleep 30; done'`.
-- Do not modify files under `agent_for_qec/v2/lib/`, `agent_for_qec/v2/runner/`,
-  `agent_for_qec/tools/` or `lightstim/`. If you need a new construction,
-  write it in your working directory and import LightStim from there.
 - Before you end: record at least one memory entry summarising the outcome of
   your assignment (a `finding` if you got facts, otherwise `obstacle` or
   `dead_end`), citing submission or fact ids.

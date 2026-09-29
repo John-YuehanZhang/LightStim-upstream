@@ -13,6 +13,11 @@ def _code(v):
     return (f"[[{c['n']},{c['k']},{c['d']}]]", c.get("d")) if c else ("-", None)
 
 
+def _cell(x, limit: int = 300) -> str:
+    """A markdown table cell: agent-written text must not break the table."""
+    return str(x if x is not None else "-").replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")[:limit]
+
+
 def render_ledger(st) -> Path:
     out = Path(os.environ.get("QEC_RESULTS_ROOT", str(V2 / "results"))) / st.project / "LEDGER.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -38,13 +43,13 @@ def render_ledger(st) -> Path:
         plat = "; ".join(f"{c['name']}: nonlocal2q={c['platform_stats']['n_nonlocal_2q']}"
                          for c in circ if c.get("platform_stats"))
         deps = ", ".join(d[:8] for d in json.loads(r["depends_on"] or "[]"))
-        L.append(f"| `{r['id'][:12]}` | {r['status']} | {r['origin']} | {r['kind']} | {r['title']} | {code} | "
+        L.append(f"| `{r['id'][:12]}` | {r['status']} | {r['origin']} | {r['kind']} | {_cell(r['title'])} | {code} | "
                  f"{dists or '-'} | {flows or '-'} | {plat or '-'} | {r['review_status']} | {r['novelty_status']} | {deps or '-'} |")
     L += ["", "## Rejected and bounds-only submissions (negative results)", "",
           "| submission | outcome | author | title | reason |", "|---|---|---|---|---|"]
     for s in st.con.execute("SELECT * FROM submissions WHERE outcome != 'accepted' ORDER BY created").fetchall():
         rep = json.loads(s["report"] or "{}")
-        reason = (rep.get("reason") or "").replace("|", "/")[:300]
-        L.append(f"| `{s['id'][:12]}` | {s['outcome']} | {s['author']} | {rep.get('title')} | {reason} |")
+        L.append(f"| `{s['id'][:12]}` | {s['outcome']} | {_cell(s['author'])} | {_cell(rep.get('title'))} | "
+                 f"{_cell(rep.get('reason'))} |")
     out.write_text("\n".join(L) + "\n")
     return out

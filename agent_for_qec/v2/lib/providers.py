@@ -69,39 +69,6 @@ def _claude_tokens(cfg) -> Dict[str, str]:
     return out
 
 
-def probe_claude(token: str, model: str) -> tuple[bool, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-    with tempfile.TemporaryDirectory() as td:
-        try:
-            r = subprocess.run(["claude", "-p", "Reply with exactly the word OK and nothing else.", "--model", model,
-                                "--max-turns", "1", "--output-format", "json"], cwd=td, env=env,
-                               capture_output=True, text=True, timeout=240)
-        except subprocess.TimeoutExpired:
-            return False, "probe timeout"
-    try:
-        d = json.loads(r.stdout)
-    except Exception:
-        return False, f"no json (exit {r.returncode})"
-    if d.get("is_error"):
-        return False, str(d.get("result"))[:120]
-    return str(d.get("result", "")).strip().startswith("OK"), str(d.get("result"))[:40]
-
-
-def _usage_since(runtime: Path, account: str, seconds: float) -> float:
-    f = runtime / "usage_log.jsonl"
-    tot, now = 0.0, time.time()
-    if f.exists():
-        for line in f.read_text().splitlines():
-            try:
-                e = json.loads(line)
-            except Exception:
-                continue
-            if e.get("account") == account and now - e.get("ts", 0) <= seconds:
-                tot += float(e.get("cost_usd") or 0)
-    return tot
-
-
 def lease_claude_oauth(cfg: dict, model: str, runtime: Path) -> Lease:
     """Pick the free account with the most quota headroom for `model`.
 
@@ -116,7 +83,7 @@ def lease_claude_oauth(cfg: dict, model: str, runtime: Path) -> Lease:
     reserve = set(cfg.get("reserve_for_fable", [])) if model not in FABLE_MODELS else set()
     lock_dir = runtime / "leases"
     lock_dir.mkdir(parents=True, exist_ok=True)
-    live = [a for a in tokens if model_ok(snap, a, model)]
+    live = [a for a in tokens if model_ok(snap, a, model, runtime)]
     live.sort(key=lambda a: (a in reserve, -snap["accounts"][a]["headroom"], a))
     for acct in live:
         fh = open(lock_dir / f"{acct}.lock", "w")
@@ -136,21 +103,39 @@ def free_accounts(cfg: dict, model: str, runtime: Path, force: bool = False) -> 
     tokens = _claude_tokens(cfg)
     separate = [model] if model in FABLE_MODELS else []
     snap = snapshot(tokens, runtime, models=separate, max_age_s=cfg.get("probe_cache_minutes", 30) * 60, force=force)
-    return [a for a in tokens if model_ok(snap, a, model)]
+    return [a for a in tokens if model_ok(snap, a, model, runtime)]
+
+
+def unleased(runtime: Path, accounts: list) -> list:
+    """Accounts not currently held by another process of this pipeline."""
+    lock_dir = runtime / "leases"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    free = []
+    for a in accounts:
+        with open(lock_dir / f"{a}.lock", "w") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                free.append(a)
+            except BlockingIOError:
+                pass
+    return free
 
 
 def invalidate_quota(runtime: Path) -> None:
-    f = runtime / "quota.json"
-    if f.exists():
-        f.unlink()
+    try:
+        (runtime / "quota.json").unlink()
+    except FileNotFoundError:
+        pass
 
 
-def mark_exhausted(runtime: Path, account: str, model: str) -> None:
+def mark_exhausted(runtime: Path, account: str, model: str, resets_at: Optional[float] = None,
+                   why: str = "hit limit during run") -> None:
+    """Block (account, model) until the reported reset time (default: 2 hours) and drop
+    the cached snapshot so the next selection re-reads the windows."""
+    from quota import block_model
+    block_model(runtime, account, model, resets_at or time.time() + 2 * 3600, why)
     invalidate_quota(runtime)
-    f = runtime / "account_state.json"
-    st = json.loads(f.read_text()) if f.exists() else {}
-    st.setdefault(account, {})[model] = {"probed_at": time.time(), "available": False, "msg": "hit limit during run"}
-    f.write_text(json.dumps(st, indent=1))
 
 
 # ------------------------------------------------------------------ dispatcher

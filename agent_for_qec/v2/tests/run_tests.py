@@ -103,6 +103,53 @@ p = subprocess.run([sys.executable, str(V2 / "qec.py"), "submit", "sub"], env=en
 check("submit over the socket runs the gate", '"outcome": "duplicate"' in p.stdout or '"outcome": "rejected"' in p.stdout,
       p.stdout[:120].replace("\n", " "))
 svc.shutdown()
+# ---- launcher: prompts and harness settings (no model call)
+sys.path.insert(0, str(V2 / "runner"))
+import launch  # noqa: E402
+st = Store("t"); st.set("round", 1)
+for role in ("main", "worker", "reviewer", "novelty"):
+    pr = launch.build_prompt(role, "t", "w1" if role == "worker" else role, st)
+    left = [t for t in ("{QEC}", "{PY}", "{REPO}", "{WORKDIR}", "{RESULTS}", "{TASK}", "{PROJECT}") if t in pr]
+    check(f"{role} prompt has no unreplaced placeholders", not left, str(left))
+    bad = [w for w in ("subagent", "budget", "quota", "headroom", "usage window") if w in pr.lower()]
+    check(f"{role} prompt carries no operator/resource policy", not bad, str(bad))
+    web = {"WebSearch", "WebFetch"} & set(launch.ROLE_TOOLS[role])
+    check(f"{role} web tools", bool(web) == (role == "novelty"), str(sorted(web)))
+d = launch.run("t", "worker", "w1", dry_run=True)
+check("dry run: harness flags", all(x in d["cmd"] for x in ("--tools", "--strict-mcp-config", "dontAsk")), "")
+check("dry run: prompt archived", Path(d["prompt_file"]).exists(), d["prompt_file"])
+# ---- agent sandbox (no model call): what an agent process can see and do
+svc = Service("t", Path(os.environ["QEC_RUNTIME_ROOT"]))
+wdir = Store("t").dir / "workers" / "w1"; wdir.mkdir(parents=True, exist_ok=True)
+home = Path(TMP, "home"); home.mkdir(exist_ok=True)
+sd = svc.endpoint("worker", "w1", [str(wdir)])
+probe = f"""
+test -z "$(ls -A {REPO}/.git)" && echo GIT_HIDDEN
+test -z "$(ls -A {REPO}/agent_for_qec/phase1)" && echo V1_HIDDEN
+test -e /nvme2n1/yuehan_zhang/.secrets/claude_oauth_tokens.txt || echo SECRETS_HIDDEN
+test -e {launch.RUNTIME_ROOT}/t/store.sqlite || echo STORE_HIDDEN
+touch {REPO}/zz_should_fail 2>/dev/null || echo REPO_RO
+touch {wdir}/ok && echo WDIR_RW
+{launch.PY} -c 'import lightstim, stim; print("IMPORT_OK")'
+{launch.QEC_CMD} status | grep -q 'role=worker worker=w1' && echo SOCKET_OK
+"""
+cmd = launch.sandbox_cmd(["bash", "-c", probe], project="t", wdir=wdir, home=home, sock_dir=sd)
+p = subprocess.run(cmd, env=launch.sandbox_env({"CLAUDE_CODE_OAUTH_TOKEN": "tok-SENTINEL"}, home),
+                   capture_output=True, text=True, timeout=120)
+for tag in ("GIT_HIDDEN", "V1_HIDDEN", "SECRETS_HIDDEN", "STORE_HIDDEN", "REPO_RO", "WDIR_RW", "IMPORT_OK", "SOCKET_OK"):
+    check(f"agent sandbox: {tag}", tag in p.stdout, p.stderr[-200:])
+check("agent sandbox: credential not on the command line", not any("SENTINEL" in c for c in cmd), "")
+svc.shutdown()
+# ---- quota bookkeeping
+import quota  # noqa: E402
+check("headroom: account answered without window data -> usable", quota.headroom({"ok": True}) == 0.5, "")
+check("headroom: missing utilization tolerated", quota.headroom({"ok": True, "five_hour": {}, "seven_day": {"utilization": 0.3}}) == 0.7, "")
+rt = Path(os.environ["QEC_RUNTIME_ROOT"])
+quota.block_model(rt, "acctX", "opus", time.time() + 60, "test")
+snap = {"accounts": {"acctX": {"headroom": 0.9, "models": {}}}}
+check("per-model block until reset", not quota.model_ok(snap, "acctX", "opus", rt) and quota.model_ok(snap, "acctX", "haiku", rt), "")
+from render import _cell  # noqa: E402
+check("ledger cells escape pipes and newlines", _cell("a|b\nc") == "a\\|b c", _cell("a|b\nc"))
 # ---- render
 out, code = run(["render"])
 check("render works", code == 0, out.strip()[:80])

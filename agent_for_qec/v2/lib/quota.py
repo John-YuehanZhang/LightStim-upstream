@@ -53,18 +53,48 @@ def _probe(token: str, model: str) -> dict:
 
 
 def headroom(entry: dict) -> float:
-    """Fraction of the binding window still available (0..1)."""
-    us = [entry.get(k, {}).get("utilization") for k in ("five_hour", "seven_day")]
-    us = [u for u in us if u is not None]
-    if not entry.get("ok") or not us:
+    """Fraction of the binding window still available (0..1). An account that answered
+    but reported no window data is given 0.5 (usable, unknown headroom)."""
+    if not entry.get("ok"):
         return 0.0
+    us = [(entry.get(k) or {}).get("utilization") for k in ("five_hour", "seven_day")]
+    us = [u for u in us if isinstance(u, (int, float))]
+    if not us:
+        return 0.5
     return max(0.0, 1.0 - max(us))
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def block_model(runtime: Path, account: str, model: str, until_ts: float, why: str) -> None:
+    """Remember that `account` cannot serve `model` until `until_ts` (per-model limits
+    are invisible in the shared windows)."""
+    f = runtime / "model_blocks.json"
+    b = _read_json(f)
+    b.setdefault(account, {})[model] = {"until": until_ts, "why": why}
+    _atomic_write(f, json.dumps(b, indent=1))
+
+
+def model_blocked(runtime: Path, account: str, model: str) -> bool:
+    e = _read_json(runtime / "model_blocks.json").get(account, {}).get(model)
+    return bool(e) and time.time() < e.get("until", 0)
 
 
 def snapshot(tokens: Dict[str, str], runtime: Path, models: Iterable[str] = (), max_age_s: float = 1800,
              force: bool = False) -> dict:
     f = runtime / "quota.json"
-    cached = json.loads(f.read_text()) if f.exists() else {}
+    cached = _read_json(f)
     if not force and cached and time.time() - cached.get("ts", 0) < max_age_s \
             and all(m in cached.get("models_probed", []) for m in models):
         return cached
@@ -82,21 +112,18 @@ def snapshot(tokens: Dict[str, str], runtime: Path, models: Iterable[str] = (), 
         for a in tokens:
             r = res.get(a, {"ok": False, "msg": "account window exhausted"})
             snap["accounts"][a]["models"][m] = {"ok": r["ok"], "msg": r["msg"]}
-    f.write_text(json.dumps(snap, indent=1))
+    _atomic_write(f, json.dumps(snap, indent=1))
     return snap
 
 
-def model_ok(snap: dict, account: str, model: str) -> bool:
+def model_ok(snap: dict, account: str, model: str, runtime: Optional[Path] = None) -> bool:
     e = snap["accounts"].get(account, {})
     if e.get("headroom", 0) <= 0:
         return False
+    if runtime is not None and model_blocked(runtime, account, model):
+        return False
     m = e.get("models", {}).get(model)
     return True if m is None else bool(m.get("ok"))   # model not probed separately -> window decides
-
-
-def subagent_budget(h: float) -> int:
-    """Parallelism does not change results, only speed: spend less of it when quota is low."""
-    return 2 if h >= 0.5 else (1 if h >= 0.2 else 0)
 
 
 def table(snap: dict) -> str:

@@ -4,11 +4,21 @@
   launch.py --project P --role worker --worker w1 [--dry-run]
 
 Builds the English prompt from prompts/<role>.md (+ domain files), acquires a
-credential lease from the configured provider, runs the harness headless with a
-per-role tool allowlist, logs stream-json output, and records the run (prompt
-SHA-256, repo HEAD, account, model, cost, turns) in the store. Every prompt text
-actually sent is archived under <runtime>/<project>/prompts_used/<sha>.md so the
-paper can cite exact prompts.
+credential lease from the configured provider and runs the harness headless
+inside the agent sandbox (lib/sandbox.wrap_agent):
+
+  * the process sees only system directories, the python environment, the
+    harness binary and the repository (without .git, v1 material and other
+    projects' results), its own working directory and a fresh home directory;
+  * the store is reached only through `qec.py`, which talks over a unix socket
+    to the service in the orchestrator; the role is bound to that socket;
+  * built-in tools are restricted per role with --tools; only the novelty role
+    has WebSearch/WebFetch.
+
+Stream-json output is logged; the run (prompt SHA-256, repo HEAD, account,
+model, cost, turns) is recorded in the store, and every prompt text actually
+sent is archived under <runtime>/<project>/prompts_used/ so the paper can cite
+exact prompts. Nothing about quota or accounts is ever added to the prompt.
 """
 from __future__ import annotations
 
@@ -16,9 +26,11 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 V2 = Path(__file__).resolve().parents[1]
@@ -26,72 +38,134 @@ REPO = V2.parents[1]
 sys.path.insert(0, str(V2 / "lib"))
 from store import Store, RUNTIME_ROOT  # noqa: E402
 from providers import load_config, acquire, mark_exhausted, NoCredential  # noqa: E402
-from quota import subagent_budget  # noqa: E402
+import sandbox  # noqa: E402
 
 PY = os.environ.get("QEC_PYTHON", "/home/yuehan/miniconda3/envs/light_stim/bin/python")
-QEC_CMD = f"{PY} agent_for_qec/v2/qec.py"
+QEC_CMD = f"{PY} {V2 / 'qec.py'}"
+SOCK_IN_SANDBOX = "/tmp/qec"
 
-READ_TOOLS = ["Read", "Glob", "Grep", "TodoWrite", "LS"]
-EDIT_TOOLS = ["Write", "Edit", "MultiEdit"]
-SHELL_READ = ["Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)",
-              "Bash(find:*)", "Bash(sed -n:*)", "Bash(diff:*)", "Bash(echo:*)", "Bash(date:*)",
-              "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)"]
-SHELL_QEC = [f"Bash({QEC_CMD}:*)"]
-SHELL_PY = [f"Bash({PY}:*)", "Bash(PYTHONPATH=:*)", "Bash(timeout:*)", "Bash(nohup:*)", "Bash(mkdir:*)",
-            "Bash(cp:*)", "Bash(mv:*)", "Bash(sleep:*)", "Bash(until:*)"]
-WEB = ["WebSearch", "WebFetch"]
-SUBAGENT = ["Task", "Agent"]
-
+BASE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 ROLE_TOOLS = {
-    # main: reads everything, runs small computations, writes strategy through qec.py; no web while solving
-    "main": READ_TOOLS + EDIT_TOOLS + SHELL_READ + SHELL_QEC + SHELL_PY + SUBAGENT,
-    # worker: builds and tests candidates, submits through the gate; no web while solving
-    "worker": READ_TOOLS + EDIT_TOOLS + SHELL_READ + SHELL_QEC + SHELL_PY + SUBAGENT,
-    # reviewer: reads and runs checks, records a review; no web
-    "reviewer": READ_TOOLS + EDIT_TOOLS + SHELL_READ + SHELL_QEC + SHELL_PY,
-    # novelty: the only role with web access; runs after the gate has accepted a fact
-    "novelty": READ_TOOLS + EDIT_TOOLS + SHELL_READ + SHELL_QEC + WEB,
+    "main": BASE_TOOLS,
+    "worker": BASE_TOOLS,
+    "reviewer": BASE_TOOLS,
+    "novelty": BASE_TOOLS + ["WebSearch", "WebFetch"],   # the only role with web access
 }
-DENY = ["Bash(git push:*)", "Bash(git commit:*)", "Bash(rm -rf:*)", "Bash(sudo:*)", "Bash(pip install:*)",
-        "Bash(curl:*)", "Bash(wget:*)"]
+# Bash has network access (the harness needs it); these rules keep the obvious
+# web clients out of the solving roles. The novelty audit after acceptance is
+# the real check that nothing was looked up.
+NO_WEB_BASH = ["Bash(curl:*)", "Bash(wget:*)", "Bash(git clone:*)", "Bash(pip:*)", "Bash(pip3:*)",
+               "Bash(conda:*)", "Bash(ssh:*)", "Bash(scp:*)", "Bash(nc:*)"]
+
+# parts of the repository that must not be visible to agents: git history
+# (contains unrelated branches), v1 material and earlier projects' results
+HIDE_IN_REPO = [".git", "agent_for_qec/phase0", "agent_for_qec/phase1", "agent_for_qec/PROGRESS.md",
+                "agent_for_qec/LEDGER.md", "agent_for_qec/prompts", "agent_for_qec/runner",
+                "agent_for_qec/v2/results", "agent_for_qec/v2/tasks", "agent_for_qec/v2/tests",
+                "agent_for_qec/v2/config", "agent_for_qec/v2/runner"]
 
 
 def build_prompt(role: str, project: str, worker: str, st: Store) -> str:
     tpl = (V2 / "prompts" / f"{role}.md").read_text()
-    rep = {
-        "{PROJECT}": project, "{ROLE}": role, "{WORKER}": worker, "{ROUND}": str(st.current_round()),
-        "{QEC}": QEC_CMD, "{PY}": PY, "{REPO}": str(REPO),
-        "{WORKDIR}": str(st.dir / "workers" / worker),
+    includes = {
         "{TASK}": Path(st.get("task_path")).read_text() if st.get("task_path") else "(no task)",
         "{ANGLES}": (V2 / "prompts" / "domain" / "angles.md").read_text(),
         "{PITFALLS}": (V2 / "prompts" / "domain" / "pitfalls.md").read_text(),
         "{SUBMISSION_FORMAT}": (V2 / "prompts" / "shared" / "submission_format.md").read_text(),
+    }
+    for k, v in includes.items():   # included files may themselves use the placeholders below
+        tpl = tpl.replace(k, v)
+    rep = {
+        "{PROJECT}": project, "{ROLE}": role, "{WORKER}": worker, "{ROUND}": str(st.current_round()),
+        "{QEC}": QEC_CMD, "{PY}": PY, "{REPO}": str(REPO),
+        "{WORKDIR}": str(st.dir / "workers" / worker),
+        "{RESULTS}": str(V2 / "results" / project),
     }
     for k, v in rep.items():
         tpl = tpl.replace(k, v)
     return tpl
 
 
-BUDGET_SECTION = """
-
-## Resource budget for this process
-
-Your account has about {pct}% of its binding usage window left. Parallel work
-does not change results, only speed, so spend parallelism according to the
-budget: you may run at most {n} subagent(s) at a time{extra}. Prefer
-sequential work when in doubt. If you are cut off by a usage limit, whatever
-you have not recorded through `qec.py` is lost; record findings as you go.
-"""
+def harness_binary() -> str:
+    import shutil
+    b = shutil.which("claude")
+    if not b:
+        raise RuntimeError("claude binary not found")
+    return str(Path(b).resolve())
 
 
-def budget_section(headroom: float) -> str:
-    n = subagent_budget(headroom)
-    extra = "; do all work yourself, sequentially" if n == 0 else ""
-    return BUDGET_SECTION.format(pct=int(round(100 * headroom)), n=n, extra=extra)
+def sandbox_cmd(inner, *, project, wdir, home, sock_dir):
+    pyenv = str(Path(PY).resolve().parents[1])
+    results = V2 / "results" / project
+    results.mkdir(parents=True, exist_ok=True)
+    return sandbox.wrap_agent(
+        inner,
+        readonly=[pyenv, str(Path(harness_binary()).parent), str(REPO)],
+        hide=[str(REPO / h) for h in HIDE_IN_REPO],
+        readonly_after=[str(results)],
+        writable=[str(wdir), str(home)],
+        binds=[(sock_dir, SOCK_IN_SANDBOX)],
+        cwd=str(wdir))
 
 
-def parse_result(log: Path) -> dict:
-    res = {}
+def sandbox_env(lease_env: dict, home: Path) -> dict:
+    pyenv = str(Path(PY).resolve().parents[1])
+    env = {"PATH": f"{pyenv}/bin:/usr/local/bin:/usr/bin:/bin", "HOME": str(home),
+           "CLAUDE_CONFIG_DIR": str(home / ".claude"), "LANG": os.environ.get("LANG", "C.UTF-8"),
+           "TMPDIR": "/tmp", "PYTHONPATH": str(REPO), "QEC_SOCKET": f"{SOCK_IN_SANDBOX}/sock",
+           "DISABLE_AUTOUPDATER": "1"}
+    for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "no_proxy", "NO_PROXY"):
+        if k in os.environ:
+            env[k] = os.environ[k]
+    env.update(lease_env)
+    return env
+
+
+def harness_cmd(role: str, model: str, prompt_file: Path, settings_file: Path, turns: int) -> list:
+    return [harness_binary(), "-p", prompt_file.read_text(), "--model", model,
+            "--tools", ",".join(ROLE_TOOLS[role]), "--setting-sources", "user", "--settings", str(settings_file),
+            "--strict-mcp-config", "--permission-mode", "dontAsk", "--max-turns", str(turns),
+            "--output-format", "stream-json", "--verbose"]
+
+
+def role_settings(role: str) -> dict:
+    deny = [] if role == "novelty" else list(NO_WEB_BASH)
+    return {"permissions": {"allow": list(ROLE_TOOLS[role]), "deny": deny, "defaultMode": "dontAsk"},
+            "includeCoAuthoredBy": False}
+
+
+class CpuSlot:
+    """Exclusive block of CPU cores for one agent process (operator limit from
+    [orchestrator] cpus_per_agent / cpu_first / cpu_slots; enforced with taskset,
+    so an agent's parallel jobs cannot exceed it)."""
+
+    def __init__(self, ocfg: dict):
+        import fcntl
+        per, first, n = (int(ocfg.get("cpus_per_agent", 16)), int(ocfg.get("cpu_first", 0)),
+                         int(ocfg.get("cpu_slots", 8)))
+        d = RUNTIME_ROOT / "cpuslots"
+        d.mkdir(parents=True, exist_ok=True)
+        self.fh, self.cpus = None, None
+        for i in range(n):
+            fh = open(d / f"{i}.lock", "w")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fh.close()
+                continue
+            self.fh, self.cpus = fh, f"{first + i * per}-{first + (i + 1) * per - 1}"
+            return
+        raise NoCredential("no free CPU slot")
+
+    def release(self):
+        if self.fh is not None:
+            self.fh.close()
+            self.fh = None
+
+
+def parse_log(log: Path) -> dict:
+    """Final result line plus any rejected rate-limit event."""
+    res, rejected = {}, None
     if log.exists():
         for line in log.read_text(errors="ignore").splitlines():
             try:
@@ -100,68 +174,107 @@ def parse_result(log: Path) -> dict:
                 continue
             if d.get("type") == "result":
                 res = d
-    return res
+            elif d.get("type") == "rate_limit_event":
+                info = d.get("rate_limit_info") or {}
+                if info.get("status") == "rejected":
+                    rejected = info
+    return {"result": res, "rejected": rejected}
+
+
+def _kill_group(p: subprocess.Popen):
+    for sig, wait in ((signal.SIGTERM, 30), (signal.SIGKILL, 10)):
+        try:
+            os.killpg(p.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            p.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def run(project: str, role: str, worker: str, dry_run: bool = False, config_path: str = None,
-        max_turns: int = None) -> dict:
+        max_turns: int = None, service=None) -> dict:
+    """Run one agent process. `service` is the orchestrator's lib.service.Service;
+    when None (stand-alone use) a private one is started for this process."""
     cfg = load_config(config_path)
     rcfg = cfg["roles"][role]
     st = Store(project)
     wdir = st.dir / "workers" / worker
     wdir.mkdir(parents=True, exist_ok=True)
     prompt = build_prompt(role, project, worker, st)
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
-    turns = max_turns or rcfg.get("max_turns", 100)
-    lease = None
-    if not dry_run:
-        lease = acquire(rcfg, cfg, RUNTIME_ROOT)
-        prompt += budget_section(lease.headroom)
     psha = hashlib.sha256(prompt.encode()).hexdigest()
     pdir = st.dir / "prompts_used"
     pdir.mkdir(exist_ok=True)
-    (pdir / f"{psha[:16]}_{role}.md").write_text(prompt)
-    cmd = ["claude", "-p", prompt, "--model", rcfg["model"], "--permission-mode", "acceptEdits",
-           "--allowedTools", *ROLE_TOOLS[role], "--disallowedTools", *DENY,
-           "--add-dir", str(st.dir), "--max-turns", str(turns), "--output-format", "stream-json", "--verbose"]
-    if dry_run:
-        return {"cmd": cmd[:2] + ["<prompt %d chars sha %s>" % (len(prompt), psha[:12])] + cmd[3:],
-                "prompt_file": str(pdir / f"{psha[:16]}_{role}.md")}
+    pfile = pdir / f"{psha[:16]}_{role}.md"
+    pfile.write_text(prompt)
+    turns = max_turns or rcfg.get("max_turns", 100)
     ts = time.strftime("%Y%m%d_%H%M%S")
+    home = st.dir / "homes" / f"{ts}_{role}_{worker}_{uuid.uuid4().hex[:6]}"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    settings_file = home / ".claude" / "settings.json"
+    settings_file.write_text(json.dumps(role_settings(role), indent=1))
+    inner = harness_cmd(role, rcfg["model"], pfile, settings_file, turns)
+
+    if dry_run:
+        cmd = sandbox_cmd(inner, project=project, wdir=wdir, home=home, sock_dir="<socket dir>")
+        i = cmd.index("-p")
+        cmd[i + 1] = f"<prompt {len(prompt)} chars sha {psha[:12]}>"
+        return {"cmd": cmd, "prompt_file": str(pfile), "settings": role_settings(role)}
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+    slot = CpuSlot(cfg.get("orchestrator", {}))
+    try:
+        lease = acquire(rcfg, cfg, RUNTIME_ROOT)
+    except Exception:
+        slot.release()
+        raise
+    own_service = service is None
+    if own_service:
+        from service import Service
+        service = Service(project, RUNTIME_ROOT)
+    sock_dir = service.endpoint(role, worker, [str(wdir)])
     logdir = st.dir / "logs"
     logdir.mkdir(exist_ok=True)
     log = logdir / f"{ts}_r{st.current_round()}_{role}_{worker}_{lease.account}.jsonl"
     run_id = st.add_run(round=st.current_round(), role=role, worker=worker, account=lease.account,
                         provider=lease.provider, model=rcfg["model"], prompt_sha=psha, repo_head=head,
                         log=str(log), started=time.time())
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")}
-    env.update(lease.env)
-    env.update({"QEC_ROLE": role, "QEC_PROJECT": project, "QEC_WORKER": worker,
-                "QEC_RUNTIME_ROOT": str(RUNTIME_ROOT), "PYTHONPATH": str(REPO)})
+    cmd = ["taskset", "-c", slot.cpus] + sandbox_cmd(inner, project=project, wdir=wdir, home=home,
+                                                      sock_dir=sock_dir)
+    env = sandbox_env(lease.env, home)
     try:
         with open(log, "w") as out, open(log.with_suffix(".err"), "w") as err:
-            p = subprocess.run(cmd, cwd=REPO, env=env, stdout=out, stderr=err,
-                               timeout=rcfg.get("wall_hours", 4.5) * 3600)
-        rc = p.returncode
-    except subprocess.TimeoutExpired:
-        rc = -9
+            p = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                 start_new_session=True)
+            try:
+                rc = p.wait(timeout=rcfg.get("wall_hours", 4.5) * 3600)
+            except subprocess.TimeoutExpired:
+                _kill_group(p)
+                rc = -9
     finally:
         lease.release()
-    res = parse_result(log)
+        slot.release()
+        service.close(sock_dir)
+        if own_service:
+            service.shutdown()
+    parsed = parse_log(log)
+    res, rej = parsed["result"], parsed["rejected"]
     cost = res.get("total_cost_usd") or 0
     st.finish_run(run_id, ended=time.time(), exit=rc, cost_usd=cost, turns=res.get("num_turns"),
                   result_head=str(res.get("result", ""))[:300])
     with open(RUNTIME_ROOT / "usage_log.jsonl", "a") as f:
         f.write(json.dumps({"ts": time.time(), "account": lease.account, "model": rcfg["model"], "role": role,
                             "project": project, "cost_usd": cost, "exit": rc}) + "\n")
-    hit_limit = bool(res.get("is_error")) and "limit" in str(res.get("result", "")).lower()
-    if not res:  # killed or crashed before a result line: look for a rejected rate-limit event
-        hit_limit = '"status":"rejected"' in log.read_text(errors="ignore")[-20000:]
+    text = str(res.get("result", "")).lower()
+    hit_limit = rej is not None or (bool(res.get("is_error")) and ("usage limit" in text or "rate limit" in text))
     if hit_limit and lease.provider == "claude_oauth":
-        mark_exhausted(RUNTIME_ROOT, lease.account, rcfg["model"])
+        mark_exhausted(RUNTIME_ROOT, lease.account, rcfg["model"], resets_at=(rej or {}).get("resetsAt"),
+                       why=f"rejected: {(rej or {}).get('rateLimitType', 'unknown')}")
     return {"exit": rc, "account": lease.account, "log": str(log), "cost_usd": cost, "turns": res.get("num_turns"),
-            "hit_limit": hit_limit, "headroom": round(lease.headroom, 2), "result": str(res.get("result", ""))[:500]}
+            "hit_limit": hit_limit, "limit_type": (rej or {}).get("rateLimitType"),
+            "is_error": bool(res.get("is_error")) or not res, "result": str(res.get("result", ""))[:500]}
 
 
 def main():

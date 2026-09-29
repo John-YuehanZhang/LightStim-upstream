@@ -10,7 +10,7 @@
 - 同一时刻最多 2 个子 agent，不用 Workflow；模拟 num_workers ≤ 16；长命令用 timeout 3600。
 - 不 push；不改 agent_for_qec/runner/ 和任何凭据文件。
 - 结束前必须更新 PROGRESS.md（本阶段移入"已完成"，写出新的"下一阶段"）和 LEDGER.md，并本地 git commit（英文提交信息，不加 Co-Authored-By）。
-- 你是一次性进程：回合结束后没有人会再唤醒你。绝不能在后台任务还在跑的时候结束回合。长计算要么在前台用 `timeout` 跑完，要么起了后台就用 `until [ -f 结果文件 ]; do sleep 30; done` 这类阻塞循环等到它结束，再继续。所有输出写到 `agent_for_qec/phaseN/` 目录下，不要写到 /tmp。
+- 你是一次性进程：回合结束后没有人会再唤醒你。绝不能在后台任务还在跑的时候结束回合，也不要用 Bash 的 run_in_background。单次 Bash 调用最长 10 分钟，超过会被自动挪到后台；所以超过 10 分钟的计算这样做：用 `nohup ... > phaseN/xxx.out 2>&1 &` 启动并让它在结束时写一个 `phaseN/xxx.done` 文件，然后反复调用 `timeout 550 bash -c 'until [ -f phaseN/xxx.done ]; do sleep 30; done'` 直到它返回 0，再读结果。所有输出写到 `agent_for_qec/phaseN/` 目录下，不要写到 /tmp。
 - 如果轮次快用完，优先把 PROGRESS.md/LEDGER.md 写完整再提交，宁可阶段没做完也不要留下无记录的工作。
 
 最后一条回复只需一段简短的中文总结：做了什么、关键数字、留下了什么问题。

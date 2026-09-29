@@ -12,7 +12,8 @@ novelty pending, record each report, and end your turn.
     {QEC} fact <id>                   # claims + gate report
     {QEC} novelty <id> --status prior_found|no_prior_found --file F
 
-Accepted submissions are in `agent_for_qec/v2/results/{PROJECT}/facts/<id prefix>/`.
+Accepted submissions are in `{RESULTS}/facts/<id prefix>/bundle/`. Your
+working directory is {WORKDIR}; files passed with `--file` must be inside it.
 
 ## Procedure for each fact
 

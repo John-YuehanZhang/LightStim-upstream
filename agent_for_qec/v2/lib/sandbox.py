@@ -45,9 +45,9 @@ def wrap(cmd: List[str], *, writable: Iterable[str] = (), readonly_extra: Iterab
     for d in writable:
         Path(d).mkdir(parents=True, exist_ok=True)
         b += ["--bind", d, d]
-    b += ["--clearenv"]
-    for k, v in env.items():
-        b += ["--setenv", k, str(v)]
+    # the environment is passed to bwrap through the process environment (caller
+    # must give subprocess env=<exactly the env the sandbox should see>), never on
+    # the command line, so credentials do not appear in `ps` output
     b += ["--chdir", cwd, "--"]
     return b + list(cmd)
 
@@ -72,5 +72,49 @@ def wrap_minimal(cmd: List[str], *, readonly: Iterable[str], writable: Iterable[
     b += ["--clearenv"]
     for k, v in env.items():
         b += ["--setenv", k, str(v)]
+    b += ["--chdir", cwd, "--"]
+    return b + list(cmd)
+
+
+SYSTEM_DIRS = ["/usr", "/bin", "/lib", "/lib64", "/lib32", "/libx32", "/etc", "/sbin"]
+
+
+def wrap_agent(cmd: List[str], *, readonly: Iterable[str], hide: Iterable[str] = (), readonly_after: Iterable[str] = (),
+               writable: Iterable[str] = (), binds: Iterable[tuple] = (), cwd: str) -> List[str]:
+    """Sandbox for an agent process (the harness plus every command it runs).
+
+    The agent sees system directories, the listed read-only paths (python env,
+    harness binary, repository), with `hide` paths inside them replaced by empty
+    tmpfs, then `readonly_after` paths re-exposed, the writable paths, and
+    `binds` (src, dst) pairs mounted writable at dst. Nothing else of the host
+    exists inside: no other projects, no store, no credentials, no home
+    directory. Network stays on (the harness talks to the model API).
+
+    The environment is inherited from the bwrap process: the caller must start
+    it with env=<exactly the variables the agent should see>. Values are never
+    put on the command line, so credentials do not appear in `ps` output.
+    """
+    b = ["bwrap", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--die-with-parent", "--unshare-pid",
+         "--unshare-ipc", "--new-session"]
+    for d in SYSTEM_DIRS:
+        if os.path.exists(d):
+            b += ["--ro-bind", d, d] if not os.path.islink(d) else ["--symlink", os.readlink(d), d]
+    # name resolution: /etc/resolv.conf is usually a symlink into /run
+    rc = os.path.realpath("/etc/resolv.conf")
+    if not rc.startswith("/etc/") and os.path.exists(rc):
+        b += ["--ro-bind", os.path.dirname(rc), os.path.dirname(rc)]
+    for d in readonly:
+        b += ["--ro-bind", d, d]
+    for d in hide:
+        if os.path.exists(d):
+            b += ["--tmpfs", d] if os.path.isdir(d) else ["--ro-bind", "/dev/null", d]
+    for d in readonly_after:
+        if os.path.exists(d):
+            b += ["--ro-bind", d, d]
+    for d in writable:
+        Path(d).mkdir(parents=True, exist_ok=True)
+        b += ["--bind", d, d]
+    for src, dst in binds:
+        b += ["--bind", src, dst]
     b += ["--chdir", cwd, "--"]
     return b + list(cmd)

@@ -15,10 +15,10 @@ Implemented in `lib/gate.py`, run on a fresh rebuild of the submission:
 
 | id | check | method |
 |---|---|---|
-| P1 | code: stabilizers commute, k and n as claimed, exact code distance = claimed d | GF(2) algebra; SAT (z3) closed from a witness |
-| P2 | noiseless circuit fires no detector and flips no observable; the detector error model builds with no non-deterministic detector | stim sampling, DEM construction |
-| P3 | every declared logical flow holds with sign | `stim.Circuit.has_flow` (unsigned result reported to diagnose sign errors) |
-| P4 | exact circuit-level distance = claimed value; fault-tolerant at this instance iff it equals d | detector-subset relaxations give a lower bound, lifted witness an upper bound, MILP (HiGHS) closes any gap; otherwise only bounds are reported |
+| P1 | code: stabilizers commute, k and n as claimed, exact code distance = claimed d, computed from the stabilizers alone (logicals derived from the normalizer) | GF(2) algebra; MILP (HiGHS), z3 as fallback |
+| P2 | declared blocks each hold exactly n data qubits; noiseless circuit fires no detector and flips no observable; the detector error model of the re-noised circuit is deterministic | stim sampling, DEM construction |
+| P3 | every declared flow holds with sign on the logical segment the gate derives (block preparation and final readout removed); every Pauli is a logical of the code on the blocks; inputs and outputs generate all 2k logicals per block (a logical→record flow for measurements) | `stim.Circuit.has_flow` (unsigned result reported to diagnose sign errors) |
+| P4 | exact circuit-level distance of the circuit re-noised by the gate (`lib/circuitops.standard_noise`), over all observables, = claimed value; fault-tolerant at this instance iff it equals d | detector-subset relaxations give a lower bound, lifted witness an upper bound, MILP (HiGHS) closes any gap; otherwise only bounds are reported |
 
 What it proves: the stated properties of the concrete circuits submitted
 (specific d), not of a code family. Trust base: stim, the GF(2) routines, z3 and
@@ -42,13 +42,34 @@ HiGHS (a SAT/LRAT certificate for the final rows is planned).
 | novelty | after review | search the web; record novelty reports | mark anything "new" |
 | human | any time | init projects, sign facts as new, everything else | |
 
-Permissions are enforced by the per-role tool allowlist in `runner/launch.py`
-and by role checks in `qec.py`. Each process reads its credential once at
-start, so accounts are switched only between processes.
+Isolation (enforced, not requested in prompts):
+
+- Every agent process runs in a bubblewrap sandbox (`lib/sandbox.wrap_agent`)
+  that contains only system directories, the python environment, the harness
+  binary, the repository read-only (without `.git`, v1 material, tasks, tests,
+  runner, config and other projects' results), the project's own results
+  read-only, its working directory and a fresh home directory. The store,
+  credentials and the rest of the host do not exist inside. The credential is
+  passed through the process environment, never on a command line.
+- The store is reached only through `qec.py`, which talks over a unix socket
+  to the service in the orchestrator (`lib/service.py`); role and worker name
+  are bound to the socket, and file arguments must lie in the agent's working
+  directory.
+- Built-in tools per role via `--tools` (Bash, Read, Write, Edit, Glob, Grep;
+  WebSearch/WebFetch only for novelty), `--permission-mode dontAsk`, no MCP,
+  settings only from the run's own config directory. Bash keeps network access
+  (the harness needs it); common web clients are denied for solving roles, and
+  the novelty audit after acceptance is the real check.
+- `build.py` runs in a second, smaller sandbox without network
+  (`lib/sandbox.wrap_minimal`).
+- Each agent process is pinned with `taskset` to its own block of cores.
+
+Each process reads its credential once at start, so accounts are switched only
+between processes.
 
 ## Shared store (`lib/store.py`, SQLite under `$QEC_RUNTIME_ROOT/<project>/`)
 
-- `facts`: content-addressed (hash of build.py + submission.json + dependencies),
+- `facts`: content-addressed (hash of the whole submission directory),
   written only by the gate, revocable with cascade to dependants.
 - `memory`: typed entries (finding, example, counterexample, dead_end, obstacle,
   direction, plan, verification, review, novelty, guidance, route_registry,
@@ -58,7 +79,8 @@ start, so accounts are switched only between processes.
 - `submissions`, `assignments`, `runs` (prompt SHA, repo HEAD, account, model,
   cost, turns for every process).
 
-Accepted submissions are copied to `results/<project>/facts/<id>/`; the ledger
+Accepted submissions are archived with the gate verdict in
+`results/<project>/facts/<id>/{bundle/,verdict.json}`; the ledger
 `results/<project>/LEDGER.md` is rendered from the store (`qec.py render`).
 
 ## Prompts (for the paper)
@@ -77,16 +99,36 @@ SHA is recorded in the `runs` table.
 `anthropic_api`, `deepseek` (Anthropic-compatible endpoint, runs in Claude
 Code), `openai` (needs the Codex CLI harness; not implemented yet).
 
+## Operator policy (never in prompts)
+
+Resource and scheduling rules are operator knowledge, kept in code and
+`config/models.toml`, never in the published prompts:
+
+- `[orchestrator] max_workers`: workers per round = min(max_workers, accounts
+  with quota for the worker model). The names w1..wN are stored as
+  `workers_this_round`; the main agent sees only the names.
+- Quota: `lib/quota.py` reads each account's 5-hour and 7-day windows (Haiku
+  probe); models with their own limit are probed separately. A process cut off
+  by a limit blocks that (account, model) until the reported reset time and is
+  relaunched on another account; its assignment stays open. With no quota
+  anywhere the loop sleeps `--wait-hours` (default 2) and re-reads.
+- `max_relaunch`, `main_attempts`, CPU pinning (`cpus_per_agent`, `cpu_first`,
+  `cpu_slots`).
+- Parallelism changes speed, not results.
+
 ## Running
 
 ```
 PY=/home/yuehan/miniconda3/envs/light_stim/bin/python
 cd /nvme2n1/yuehan_zhang/LightStim-upstream
-$PY agent_for_qec/v2/qec.py --project calib_rotated init --task agent_for_qec/v2/tasks/calib_rotated/TASK.md
-nohup $PY agent_for_qec/v2/runner/orchestrate.py --project calib_rotated --rounds 3 --workers w1,w2 \
-      > /nvme2n1/yuehan_zhang/agent_for_qec_runtime/calib_rotated.orchestrate.log 2>&1 &
-$PY agent_for_qec/v2/qec.py --project calib_rotated status      # inspect at any time
+$PY agent_for_qec/v2/runner/quota_report.py --force                  # quota of every account
+$PY agent_for_qec/v2/qec.py --project P init --task agent_for_qec/v2/tasks/calib_rotated/TASK.md --origin calibration
+nohup $PY agent_for_qec/v2/runner/orchestrate.py --project P --rounds 3 \
+      > /nvme2n1/yuehan_zhang/agent_for_qec_runtime/P.orchestrate.log 2>&1 &
+$PY agent_for_qec/v2/qec.py --project P status      # inspect at any time
+$PY agent_for_qec/v2/runner/launch.py --project P --role worker --worker w1 --dry-run   # show the sandboxed command
 ```
 
-Gate self-test (good / wrong-sign / over-claimed fixtures):
-`agent_for_qec/v2/tests/fixtures/`, see `tests/run_gate_fixtures.sh`.
+Tests (gate fixtures, exploits, store, roles, socket service, launcher,
+agent sandbox, quota bookkeeping; no model calls):
+`QEC_TEST_TMP=<scratch> PYTHONPATH=. $PY agent_for_qec/v2/tests/run_tests.py`.

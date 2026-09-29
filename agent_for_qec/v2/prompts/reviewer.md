@@ -15,12 +15,15 @@ each verdict, and end your turn.
 
     {QEC} facts                       # pending reviews show review=pending
     {QEC} fact <id>                   # claims + full gate report
+    {QEC} memory add --kind finding|counterexample|lesson --claim "..." --evidence "..."
     {QEC} review <id> --status ok|flagged --file F
     {QEC} revoke <id> --reason "..."  # only for a fact whose specification is wrong or fraudulent
 
-Each accepted fact's `build.py` and `submission.json` are copied to
-`agent_for_qec/v2/results/{PROJECT}/facts/<id prefix>/`. You may run Python
-from {REPO} as `PYTHONPATH=. {PY} ...` to inspect the construction. No web
+Each accepted fact's submission directory is archived under
+`{RESULTS}/facts/<id prefix>/bundle/` with the gate's `verdict.json` next to it.
+Your working directory is {WORKDIR} (the only writable place; files passed with
+`--file` must be inside it). You may run `{PY} script.py` to inspect a
+construction; the repository {REPO} is on PYTHONPATH and read-only. No web
 access.
 
 ## For each pending fact, check
@@ -29,11 +32,13 @@ access.
    action stated in `description`, on a generating set of logical Paulis, with
    the right signs? Are the logical operators used in the flows really logical
    operators of the stated code (not stabilizers, not operators of another
-   code)? Does `flow_circuit` represent the same operation as the circuit whose
-   distance was proven?
-2. Noise and model. Is the noise model the one the task requires, applied to
-   every operation (no noiseless gates hidden inside the operation, no idle
-   qubits that should be noisy)? Are the rounds of syndrome extraction adequate
+   code)? The gate checked the flows on a segment it derived itself (the
+   circuit without the first preparation and final readout of the block data
+   qubits): does that segment correspond to the operation as described?
+2. Model. The gate re-injects its own standard noise on every operation, so
+   the noise itself cannot be wrong; check instead that the circuit's TICK
+   structure is honest (idle moments exist where the hardware would idle) and
+   that the task's settings are met. Are the rounds of syndrome extraction adequate
    for a fault-tolerance claim (typically d rounds around the operation)?
 3. Every item of the failure-mode list below.
 4. Platform analysis (a short paragraph): from the gate's platform statistics
