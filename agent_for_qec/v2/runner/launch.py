@@ -26,6 +26,7 @@ REPO = V2.parents[1]
 sys.path.insert(0, str(V2 / "lib"))
 from store import Store, RUNTIME_ROOT  # noqa: E402
 from providers import load_config, acquire, mark_exhausted, NoCredential  # noqa: E402
+from quota import subagent_budget  # noqa: E402
 
 PY = os.environ.get("QEC_PYTHON", "/home/yuehan/miniconda3/envs/light_stim/bin/python")
 QEC_CMD = f"{PY} agent_for_qec/v2/qec.py"
@@ -71,6 +72,24 @@ def build_prompt(role: str, project: str, worker: str, st: Store) -> str:
     return tpl
 
 
+BUDGET_SECTION = """
+
+## Resource budget for this process
+
+Your account has about {pct}% of its binding usage window left. Parallel work
+does not change results, only speed, so spend parallelism according to the
+budget: you may run at most {n} subagent(s) at a time{extra}. Prefer
+sequential work when in doubt. If you are cut off by a usage limit, whatever
+you have not recorded through `qec.py` is lost; record findings as you go.
+"""
+
+
+def budget_section(headroom: float) -> str:
+    n = subagent_budget(headroom)
+    extra = "; do all work yourself, sequentially" if n == 0 else ""
+    return BUDGET_SECTION.format(pct=int(round(100 * headroom)), n=n, extra=extra)
+
+
 def parse_result(log: Path) -> dict:
     res = {}
     if log.exists():
@@ -92,19 +111,22 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     wdir = st.dir / "workers" / worker
     wdir.mkdir(parents=True, exist_ok=True)
     prompt = build_prompt(role, project, worker, st)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+    turns = max_turns or rcfg.get("max_turns", 100)
+    lease = None
+    if not dry_run:
+        lease = acquire(rcfg, cfg, RUNTIME_ROOT)
+        prompt += budget_section(lease.headroom)
     psha = hashlib.sha256(prompt.encode()).hexdigest()
     pdir = st.dir / "prompts_used"
     pdir.mkdir(exist_ok=True)
     (pdir / f"{psha[:16]}_{role}.md").write_text(prompt)
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
-    turns = max_turns or rcfg.get("max_turns", 100)
     cmd = ["claude", "-p", prompt, "--model", rcfg["model"], "--permission-mode", "acceptEdits",
            "--allowedTools", *ROLE_TOOLS[role], "--disallowedTools", *DENY,
            "--add-dir", str(st.dir), "--max-turns", str(turns), "--output-format", "stream-json", "--verbose"]
     if dry_run:
         return {"cmd": cmd[:2] + ["<prompt %d chars sha %s>" % (len(prompt), psha[:12])] + cmd[3:],
                 "prompt_file": str(pdir / f"{psha[:16]}_{role}.md")}
-    lease = acquire(rcfg, cfg, RUNTIME_ROOT)
     ts = time.strftime("%Y%m%d_%H%M%S")
     logdir = st.dir / "logs"
     logdir.mkdir(exist_ok=True)
@@ -133,10 +155,13 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     with open(RUNTIME_ROOT / "usage_log.jsonl", "a") as f:
         f.write(json.dumps({"ts": time.time(), "account": lease.account, "model": rcfg["model"], "role": role,
                             "project": project, "cost_usd": cost, "exit": rc}) + "\n")
-    if res.get("is_error") and "limit" in str(res.get("result", "")).lower() and lease.provider == "claude_oauth":
+    hit_limit = bool(res.get("is_error")) and "limit" in str(res.get("result", "")).lower()
+    if not res:  # killed or crashed before a result line: look for a rejected rate-limit event
+        hit_limit = '"status":"rejected"' in log.read_text(errors="ignore")[-20000:]
+    if hit_limit and lease.provider == "claude_oauth":
         mark_exhausted(RUNTIME_ROOT, lease.account, rcfg["model"])
     return {"exit": rc, "account": lease.account, "log": str(log), "cost_usd": cost, "turns": res.get("num_turns"),
-            "result": str(res.get("result", ""))[:500]}
+            "hit_limit": hit_limit, "headroom": round(lease.headroom, 2), "result": str(res.get("result", ""))[:500]}
 
 
 def main():
