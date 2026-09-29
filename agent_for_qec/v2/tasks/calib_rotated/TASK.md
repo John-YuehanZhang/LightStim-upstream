@@ -21,7 +21,9 @@ explaining the mechanism):
    d = 3 and d = 5.
 3. Logical Hadamard on one patch by any mechanism you choose, with signed
    flows (X_L -> Z_L and Z_L -> X_L, up to the correct sign) and the exact
-   circuit-level distance reported truthfully, for d = 3 and d = 5. If your
+   circuit-level distance reported truthfully, for d = 3 and d = 5. At the end
+   of the operation the patch must occupy the same data qubits with the same
+   stabilizer group as at the start (the gate checks this). If your
    construction does not reach distance d, record the lightest undetected
    error and the mechanism as an obstacle, and try a different mechanism.
 4. A logical Z⊗Z measurement between two patches by lattice surgery (d = 3),

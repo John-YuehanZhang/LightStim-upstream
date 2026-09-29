@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch one role process (main | worker | reviewer | novelty) for a project.
+"""Launch one role process (main | worker | refuter | novelty) for a project.
 
   launch.py --project P --role worker --worker w1 [--dry-run]
 
@@ -13,7 +13,13 @@ inside the agent sandbox (lib/sandbox.wrap_agent):
   * the store is reached only through `qec.py`, which talks over a unix socket
     to the service in the orchestrator; the role is bound to that socket;
   * built-in tools are restricted per role with --tools; only the novelty role
-    has WebSearch/WebFetch.
+    has WebSearch/WebFetch;
+  * the process's own operating rules (e.g. how many subagents it may run, from
+    its account's remaining quota) are written to the store as an
+    `operating_rules` memory before it starts; the agent reads them with
+    `qec.py status`. Nothing about quota or accounts is ever in the prompt;
+  * all HTTP(S) traffic goes through a recording proxy (lib/netlog.py); the
+    destinations are logged next to the transcript for the network audit.
 
 Stream-json output is logged; the run (prompt SHA-256, repo HEAD, account,
 model, cost, turns) is recorded in the store, and every prompt text actually
@@ -38,17 +44,18 @@ REPO = V2.parents[1]
 sys.path.insert(0, str(V2 / "lib"))
 from store import Store, RUNTIME_ROOT  # noqa: E402
 from providers import load_config, acquire, mark_exhausted, NoCredential  # noqa: E402
+from netlog import RecordingProxy  # noqa: E402
 import sandbox  # noqa: E402
 
 PY = os.environ.get("QEC_PYTHON", "/home/yuehan/miniconda3/envs/light_stim/bin/python")
 QEC_CMD = f"{PY} {V2 / 'qec.py'}"
 SOCK_IN_SANDBOX = "/tmp/qec"
 
-BASE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+BASE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task"]
 ROLE_TOOLS = {
     "main": BASE_TOOLS,
     "worker": BASE_TOOLS,
-    "reviewer": BASE_TOOLS,
+    "refuter": BASE_TOOLS,
     "novelty": BASE_TOOLS + ["WebSearch", "WebFetch"],   # the only role with web access
 }
 # Bash has network access (the harness needs it); these rules keep the obvious
@@ -126,6 +133,20 @@ def harness_cmd(role: str, model: str, prompt_file: Path, settings_file: Path, t
             "--tools", ",".join(ROLE_TOOLS[role]), "--setting-sources", "user", "--settings", str(settings_file),
             "--strict-mcp-config", "--permission-mode", "dontAsk", "--max-turns", str(turns),
             "--output-format", "stream-json", "--verbose"]
+
+
+def subagent_limit(headroom: float, ocfg: dict) -> int:
+    """Operator policy: subagents per process from the account's remaining quota
+    (parallelism changes speed, not results)."""
+    for thr, n in ocfg.get("subagent_thresholds", [[0.5, 2], [0.2, 1]]):
+        if headroom >= thr:
+            return int(n)
+    return 0
+
+
+def process_rules(n_sub: int) -> str:
+    return ("- You may run at most {n} subagent(s) at a time.{x}".format(
+        n=n_sub, x=" Do all work yourself, sequentially." if n_sub == 0 else ""))
 
 
 def role_settings(role: str) -> dict:
@@ -235,6 +256,7 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
         from service import Service
         service = Service(project, RUNTIME_ROOT)
     sock_dir = service.endpoint(role, worker, [str(wdir)])
+    st.set_operating_rules(worker, process_rules(subagent_limit(lease.headroom, cfg.get("orchestrator", {}))))
     logdir = st.dir / "logs"
     logdir.mkdir(exist_ok=True)
     log = logdir / f"{ts}_r{st.current_round()}_{role}_{worker}_{lease.account}.jsonl"
@@ -243,7 +265,8 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
                         log=str(log), started=time.time())
     cmd = ["taskset", "-c", slot.cpus] + sandbox_cmd(inner, project=project, wdir=wdir, home=home,
                                                       sock_dir=sock_dir)
-    env = sandbox_env(lease.env, home)
+    proxy = RecordingProxy(log.with_suffix(".net.log"), f"{role}/{worker}")
+    env = {**sandbox_env(lease.env, home), **proxy.env()}
     try:
         with open(log, "w") as out, open(log.with_suffix(".err"), "w") as err:
             p = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -256,6 +279,7 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     finally:
         lease.release()
         slot.release()
+        proxy.close()
         service.close(sock_dir)
         if own_service:
             service.shutdown()

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 RUNTIME_ROOT = Path(os.environ.get("QEC_RUNTIME_ROOT", "/nvme2n1/yuehan_zhang/agent_for_qec_runtime"))
+SYSTEM_VERSION = "2.2"
 
 MEMORY_KINDS = {
     # written by workers
@@ -28,7 +29,15 @@ MEMORY_KINDS = {
     "elaboration", "guidance", "route_registry",
     # written automatically / by other roles
     "verification", "review", "novelty", "lesson", "operator",
+    # written by the orchestrator only: run conditions the agents must follow
+    "operating_rules",
+    # written by refuters
+    "refutation",
 }
+
+# aggregated refutation state of a fact
+REFUTE_STATES = ("unchallenged", "challenged", "no_problem_found", "doubtful", "refuted_pending_human",
+                 "refutation_rejected", "refutation_upheld")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS project (
@@ -48,7 +57,17 @@ CREATE TABLE IF NOT EXISTS facts (
   review TEXT,
   novelty_status TEXT DEFAULT 'pending', -- pending | prior_found | no_prior_found | human_confirmed_new
   novelty TEXT,
-  origin TEXT DEFAULT 'agent'            -- agent | calibration | human
+  origin TEXT DEFAULT 'agent',           -- agent | calibration | human
+  refute_status TEXT DEFAULT 'unchallenged'
+);
+CREATE TABLE IF NOT EXISTS challenges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  round INTEGER, fact_id TEXT, n INTEGER, focus TEXT, created REAL,
+  status TEXT DEFAULT 'open'             -- open | done
+);
+CREATE TABLE IF NOT EXISTS refutations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  challenge_id INTEGER, fact_id TEXT, refuter TEXT, verdict TEXT, text TEXT, evidence TEXT, created REAL
 );
 CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY,
@@ -114,6 +133,9 @@ class Store:
         self.con.execute("PRAGMA journal_mode=WAL")
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
+        cols = {r[1] for r in self.con.execute("PRAGMA table_info(facts)")}
+        if "refute_status" not in cols:     # stores created before v2.2
+            self.con.execute("ALTER TABLE facts ADD COLUMN refute_status TEXT DEFAULT 'unchallenged'")
         self.con.commit()
 
     # ------------------------------------------------------------ project kv
@@ -266,6 +288,83 @@ class Store:
     def assignment(self, worker: str) -> Optional[sqlite3.Row]:
         return self.con.execute("SELECT * FROM assignments WHERE worker=? AND status='open' ORDER BY id DESC LIMIT 1",
                                 (worker,)).fetchone()
+
+    # ------------------------------------------------------------ operating rules
+    def set_operating_rules(self, scope: str, text: str) -> int:
+        """Orchestrator only. scope 'all' applies to every process of the round,
+        otherwise it is the name of one process (worker/refuter/main/...)."""
+        return self.add_memory("operating_rules", "operator", text, extra={"scope": scope})
+
+    def operating_rules_for(self, name: str) -> List[sqlite3.Row]:
+        """Latest round-wide rules and latest rules addressed to `name`."""
+        out = []
+        for scope in ("all", name):
+            r = self.con.execute("SELECT * FROM memory WHERE kind='operating_rules' AND json_extract(extra,'$.scope')=?"
+                                 " ORDER BY id DESC LIMIT 1", (scope,)).fetchone()
+            if r is not None:
+                out.append(r)
+        return out
+
+    # ------------------------------------------------------------ challenges / refutations
+    def add_challenge(self, fact_id: str, n: int, focus: str) -> int:
+        fid = self.resolve_fact_id(fact_id)
+        if not 1 <= n <= 5:
+            raise ValueError("number of refuters must be between 1 and 5")
+        cur = self.con.execute("INSERT INTO challenges(round,fact_id,n,focus,created) VALUES(?,?,?,?,?)",
+                               (self.current_round(), fid, n, focus, time.time()))
+        self.con.execute("UPDATE facts SET refute_status='challenged' WHERE id=? AND refute_status='unchallenged'",
+                         (fid,))
+        self.con.commit()
+        return cur.lastrowid
+
+    def challenge(self, cid: int) -> Optional[sqlite3.Row]:
+        return self.con.execute("SELECT * FROM challenges WHERE id=?", (int(cid),)).fetchone()
+
+    def open_challenges(self) -> List[sqlite3.Row]:
+        return self.con.execute("SELECT * FROM challenges WHERE status='open' ORDER BY id").fetchall()
+
+    def close_challenge(self, cid: int) -> None:
+        self.con.execute("UPDATE challenges SET status='done' WHERE id=?", (int(cid),))
+        self.con.commit()
+
+    def add_refutation(self, cid: int, refuter: str, verdict: str, text: str, evidence: str) -> None:
+        if verdict not in ("refuted", "doubtful", "no_problem_found"):
+            raise ValueError("verdict must be refuted | doubtful | no_problem_found")
+        ch = self.challenge(cid)
+        if ch is None:
+            raise ValueError(f"no challenge {cid}")
+        if verdict == "refuted" and not (evidence or "").strip():
+            raise ValueError("a refutation needs reproducible evidence (--evidence-file with the script and its output)")
+        if self.con.execute("SELECT 1 FROM refutations WHERE challenge_id=? AND refuter=?", (cid, refuter)).fetchone():
+            raise ValueError("you have already recorded a verdict for this challenge")
+        self.con.execute("INSERT INTO refutations(challenge_id,fact_id,refuter,verdict,text,evidence,created)"
+                         " VALUES(?,?,?,?,?,?,?)", (cid, ch["fact_id"], refuter, verdict, text, evidence, time.time()))
+        self.con.commit()
+        self._aggregate_refute(ch["fact_id"])
+
+    def refutations(self, fact_id: str) -> List[sqlite3.Row]:
+        return self.con.execute("SELECT * FROM refutations WHERE fact_id=? ORDER BY id", (fact_id,)).fetchall()
+
+    def _aggregate_refute(self, fact_id: str) -> None:
+        r = self.fact(fact_id, exact=True)
+        if r is None or r["refute_status"] in ("refutation_rejected", "refutation_upheld"):
+            return
+        vs = [x["verdict"] for x in self.refutations(fact_id)]
+        st = ("refuted_pending_human" if "refuted" in vs else "doubtful" if "doubtful" in vs
+              else "no_problem_found" if vs else r["refute_status"])
+        self.con.execute("UPDATE facts SET refute_status=? WHERE id=?", (st, fact_id))
+        self.con.commit()
+
+    def adjudicate(self, fact_id: str, uphold: bool, reason: str) -> None:
+        """Human decision on a refuted fact: uphold the refutation (fact revoked) or reject it."""
+        r = self.fact(fact_id)
+        if r is None or r["refute_status"] not in ("refuted_pending_human", "doubtful"):
+            raise ValueError("only a refuted or doubtful fact can be adjudicated")
+        self.con.execute("UPDATE facts SET refute_status=? WHERE id=?",
+                         ("refutation_upheld" if uphold else "refutation_rejected", r["id"]))
+        self.con.commit()
+        if uphold:
+            self.revoke(r["id"], f"refutation upheld by human: {reason}")
 
     # ------------------------------------------------------------ runs
     def add_run(self, **kw) -> int:

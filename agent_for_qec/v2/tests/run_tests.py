@@ -107,11 +107,13 @@ svc.shutdown()
 sys.path.insert(0, str(V2 / "runner"))
 import launch  # noqa: E402
 st = Store("t"); st.set("round", 1)
-for role in ("main", "worker", "reviewer", "novelty"):
+for role in ("main", "worker", "refuter", "novelty"):
     pr = launch.build_prompt(role, "t", "w1" if role == "worker" else role, st)
     left = [t for t in ("{QEC}", "{PY}", "{REPO}", "{WORKDIR}", "{RESULTS}", "{TASK}", "{PROJECT}") if t in pr]
     check(f"{role} prompt has no unreplaced placeholders", not left, str(left))
-    bad = [w for w in ("subagent", "budget", "quota", "headroom", "usage window") if w in pr.lower()]
+    import re as _re
+    bad = [w for w in ("budget", "quota", "headroom", "usage window", "acct") if w in pr.lower()]
+    bad += _re.findall(r"at most \d+ (?:subagent|worker|process)", pr.lower())
     check(f"{role} prompt carries no operator/resource policy", not bad, str(bad))
     web = {"WebSearch", "WebFetch"} & set(launch.ROLE_TOOLS[role])
     check(f"{role} web tools", bool(web) == (role == "novelty"), str(sorted(web)))
@@ -124,7 +126,7 @@ wdir = Store("t").dir / "workers" / "w1"; wdir.mkdir(parents=True, exist_ok=True
 home = Path(TMP, "home"); home.mkdir(exist_ok=True)
 sd = svc.endpoint("worker", "w1", [str(wdir)])
 probe = f"""
-test -z "$(ls -A {REPO}/.git)" && echo GIT_HIDDEN
+{{ [ -d {REPO}/.git ] && [ -z "$(ls -A {REPO}/.git)" ]; }} || {{ [ -e {REPO}/.git ] && [ ! -s {REPO}/.git ]; }} && echo GIT_HIDDEN
 test -z "$(ls -A {REPO}/agent_for_qec/phase1)" && echo V1_HIDDEN
 test -e /nvme2n1/yuehan_zhang/.secrets/claude_oauth_tokens.txt || echo SECRETS_HIDDEN
 test -e {launch.RUNTIME_ROOT}/t/store.sqlite || echo STORE_HIDDEN
@@ -150,6 +152,86 @@ snap = {"accounts": {"acctX": {"headroom": 0.9, "models": {}}}}
 check("per-model block until reset", not quota.model_ok(snap, "acctX", "opus", rt) and quota.model_ok(snap, "acctX", "haiku", rt), "")
 from render import _cell  # noqa: E402
 check("ledger cells escape pipes and newlines", _cell("a|b\nc") == "a\\|b c", _cell("a|b\nc"))
+# ---- v2.2: operating rules
+st = Store("t")
+st.set_operating_rules("all", "- Workers available this round: w1, w2.")
+st.set_operating_rules("w1", "- You may run at most 2 subagent(s) at a time.")
+st.set_operating_rules("w2", "- You may run at most 0 subagent(s) at a time.")
+out, code = run(["status"], role="worker", worker="w1")
+check("status shows round rules and this process's rules only",
+      "Workers available this round: w1, w2" in out and "at most 2 subagent" in out and "at most 0" not in out, "")
+out, code = run(["memory", "add", "--kind", "operating_rules", "--claim", "x"], role="main", worker="main")
+check("agents cannot write operating rules", code == 13, out.strip()[:80])
+# ---- v2.2: challenges, refutations, human adjudication
+fact = Store("t").facts()[0]
+out, code = run(["challenge", fact["id"][:12], "--n", "2", "--focus", "x"], role="worker", worker="w1")
+check("worker cannot open a challenge", code == 13, out.strip()[:80])
+out, code = run(["challenge", fact["id"][:12], "--n", "2", "--focus", "does the flow describe CNOT?"],
+                role="main", worker="main")
+check("main opens a challenge", code == 0 and "challenge #1" in out, out.strip()[:100])
+check("challenged fact state", Store("t").fact(fact["id"], exact=True)["refute_status"] == "challenged", "")
+st = Store("t"); st.assign("rf1_1", "challenge #1: fact " + fact["id"])
+out, code = run(["memory", "search", "--limit", "3"], role="refuter", worker="rf1_1")
+check("refuter cannot read the submitters' shared memory", code == 13, out.strip()[:80])
+out, code = run(["refute", "1", "--verdict", "refuted", "--text", "wrong"], role="refuter", worker="rf1_1")
+check("refutation without reproducible evidence is refused", code != 0, out.strip()[:100])
+out, code = run(["refute", "1", "--verdict", "refuted", "--text", "x"], role="refuter", worker="rf9_9")
+check("refuter cannot answer a challenge not assigned to it", code == 13, out.strip()[:80])
+ev = wdir_ev = Path(TMP, "ev.py"); ev.write_text("print('defect')\n# output: defect\n")
+out, code = run(["refute", "1", "--verdict", "refuted", "--text", "flows wrong", "--evidence-file", str(ev)],
+                role="refuter", worker="rf1_1")
+check("refutation with evidence recorded", code == 0, out.strip()[:100])
+r = Store("t").fact(fact["id"], exact=True)
+check("refuted fact stays active, pending human", r["status"] == "active" and r["refute_status"] == "refuted_pending_human",
+      f"{r['status']} {r['refute_status']}")
+run(["render"])
+led = (Path(os.environ["QEC_RESULTS_ROOT"]) / "t" / "LEDGER.md").read_text()
+check("ledger lists passed-but-refuted facts in their own section",
+      "Passed the gate but refuted" in led and fact["id"][:12] in led.split("Passed the gate but refuted")[1].split("## ")[0],
+      "")
+out, code = run(["adjudicate", fact["id"][:12], "--reject", "--reason", "refuter misread the flow"])
+check("human rejects the refutation", code == 0 and Store("t").fact(fact["id"], exact=True)["refute_status"]
+      == "refutation_rejected", out.strip()[:80])
+# ---- v2.2: run archive
+from archive import write_run_info, write_runs_index  # noqa: E402
+Path(TMP, "task2.md").write_text("# archived task\n")
+out, code = run(["init", "--task", f"{TMP}/task2.md"], project="arch")
+ri = Store("arch").dir / "RUN_INFO.md"
+check("init writes RUN_INFO.md with version and commit", ri.exists() and "system version: v2.2" in ri.read_text(), out[:120])
+out, code = run(["runinfo", "--status", "void", "--note", "test run"], project="arch")
+idx = (Path(os.environ["QEC_RUNTIME_ROOT"]) / "RUNS.md").read_text()
+check("RUNS.md index lists the project with its status", "arch" in idx and "void" in idx, idx[-200:])
+# ---- v2.2: network audit
+from audit_network import audit  # noqa: E402
+lg = Store("t").dir / "logs"; lg.mkdir(exist_ok=True)
+(lg / "20260101_000000_r1_worker_w1_acctX.net.log").write_text(
+    json.dumps({"ts": 1, "process": "worker/w1", "method": "CONNECT", "host": "api.anthropic.com", "port": 443}) + "\n" +
+    json.dumps({"ts": 2, "process": "worker/w1", "method": "CONNECT", "host": "arxiv.org", "port": 443}) + "\n")
+(lg / "20260101_000000_r1_worker_w1_acctX.jsonl").write_text(json.dumps(
+    {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash",
+     "input": {"command": "python -c 'import urllib.request'"}}]}}) + "\n")
+rep, flagged = audit("t")
+txt = rep.read_text()
+check("network audit flags a non-harness host and network code", flagged and "arxiv.org" in txt and "urllib" in txt
+      and "api.anthropic.com:443" not in txt, "")
+# ---- v2.2: orchestrator turns challenges into refuter assignments and writes round rules
+import argparse as _ap  # noqa: E402
+import orchestrate  # noqa: E402
+o = orchestrate.Orchestrator(_ap.Namespace(project="t", config=None, rounds=1, wait_hours=2, max_wait_hours=0,
+                                           skip_main_first=False))
+st = Store("t")
+f2 = st.facts()[-1]
+cid = st.add_challenge(f2["id"], 2, "check the layout claim")
+names = o.open_refuters(st)
+check("each challenge becomes n refuter assignments", [n for n in names if n.startswith(f"rf{cid}_")] ==
+      [f"rf{cid}_1", f"rf{cid}_2"] and f"challenge #{cid}" in Store("t").assignment(f"rf{cid}_1")["text"], str(names))
+check("refuter assignments are not duplicated", o.open_refuters(Store("t")) == names, "")
+o.round_rules(st, ["w1", "w2", "w3"])
+rules = "\n".join(r["claim"] for r in Store("t").operating_rules_for("w1"))
+check("round rules list workers and the no-internet rule", "w1, w2, w3" in rules and "internet" in rules, rules[:120])
+o.round_rules(st, [], closing=True)
+check("closing-pass rules say no assignments run", "closing pass" in Store("t").operating_rules_for("x")[0]["claim"], "")
+o.service.shutdown()
 # ---- render
 out, code = run(["render"])
 check("render works", code == 0, out.strip()[:80])

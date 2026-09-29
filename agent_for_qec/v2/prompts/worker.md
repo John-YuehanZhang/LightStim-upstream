@@ -13,12 +13,14 @@ turn. Nobody will wake you up again in this process.
 
 ## Start here
 
-    {QEC} status                      # latest guidance, facts, recent memory
+    {QEC} status                      # operating rules, latest guidance, facts, recent memory
     {QEC} assignment                  # full text of your assignment
     {QEC} memory search --kind dead_end obstacle counterexample verification --limit 40
     {QEC} fact <id>                   # gate report of a fact you build on
 
-Read your assignment and the latest guidance first. Read the dead ends and the
+`status` starts with the operating rules for this run (compute, subagents,
+tool-call limits); follow them. Read your assignment and the latest guidance
+first. Read the dead ends and the
 gate's verification records before you start, so you do not repeat a failure
 that is already recorded.
 
@@ -74,10 +76,10 @@ points against the goal itself.
   record vague optimism or claims that an unchecked step is "routine".
 - Wrap long commands in `timeout`.
 - You are a one-shot process. Never end your turn while a background job is
-  still running. A single tool call is limited to about 10 minutes: for longer
-  computations start them with `nohup ... > {WORKDIR}/job.out 2>&1 &` writing a
-  `.done` file at the end, then repeatedly call
-  `timeout 550 bash -c 'until [ -f {WORKDIR}/job.done ]; do sleep 30; done'`.
+  still running.
+- An accepted fact may later be attacked by independent refuters. State in
+  `description` exactly what the construction does and which assumptions it
+  uses, so that it can be checked against what it claims.
 - Before you end: record at least one memory entry summarising the outcome of
   your assignment (a `finding` if you got facts, otherwise `obstacle` or
   `dead_end`), citing submission or fact ids.

@@ -1,4 +1,4 @@
-<!-- PLACEHOLDER (2026-09-29): drafted by the assistant as an example; to be rewritten by the operator. -->
+<!-- PLACEHOLDER (2026-09-29, v2.2): families of mechanisms only, no results; to be rewritten by the operator. -->
 
 Families of mechanisms for implementing logical operations fault-tolerantly
 and for constructing codes. Treat them as starting points, not an exhaustive

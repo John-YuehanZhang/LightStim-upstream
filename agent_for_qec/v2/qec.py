@@ -17,12 +17,15 @@ which executes it with the role bound to that socket. Run without QEC_SOCKET
   facts [--all]                  list facts;   fact ID   one fact in full
   assign WORKER --file F | --text T          (main)
   guidance | registry | elaboration --file F | --text T   (main)
+  challenge FACT --n N --focus F | --focus-file F   (main) ask N independent refuters to attack a fact
+  refute CHALLENGE --verdict refuted|doubtful|no_problem_found --file F [--evidence-file E]   (refuter)
   done --reason R                (main, human)
-  revoke ID --reason R           (main, reviewer, human)
-  review ID --status ok|flagged --file F     (reviewer, human)
+  revoke ID --reason R           (main, human)
+  adjudicate ID --uphold|--reject --reason R   (human) decide a refuted fact
   novelty ID --status prior_found|no_prior_found --file F   (novelty, human)
   sign-new ID                    (human)
   render                         (human) write results/<project>/LEDGER.md
+  runinfo [--status valid|historical|void] [--note N]   (human) write RUN_INFO.md and RUNS.md
   init --task FILE [--origin agent|calibration] [--noise-p P]   (human)
 """
 from __future__ import annotations
@@ -84,19 +87,29 @@ def fact_summary(r) -> str:
                    f"{' FT' if c.get('P4_distance', {}).get('fault_tolerant_at_instance') else ''}" for c in circ)
     cd = f"[[{code['n']},{code['k']},{code['d']}]]" if code else "-"
     return (f"{r['id'][:12]}  {r['kind']:<19} {cd:<14} {short(r['title'], 60):<60}  {cs}  "
-            f"review={r['review_status']} novelty={r['novelty_status']} origin={r['origin']}"
+            f"refute={r['refute_status']} novelty={r['novelty_status']} origin={r['origin']}"
             + (f"  REVOKED: {short(r['revoked_reason'], 60)}" if r["status"] == "revoked" else ""))
 
 
 # ------------------------------------------------------------------ commands
+def print_rules(st, name):
+    rules = st.operating_rules_for(name)
+    if rules:
+        print("## operating rules for this run (set by the operator; follow them)")
+        for r in rules:
+            print(textwrap.indent(r["claim"].strip(), "  "))
+        print()
+
+
 def c_status(cx, a):
     st = cx.st
     print(f"# project {st.project}   round {st.current_round()}   status {st.get('status', 'open')}")
-    print(f"# you are role={cx.role} worker={cx.worker}")
-    ws = st.get("workers_this_round")
-    if ws:
-        print(f"# workers available this round: {', '.join(ws)}")
-    print()
+    print(f"# you are role={cx.role} worker={cx.worker}\n")
+    print_rules(st, cx.worker)
+    if cx.role == "refuter":        # refuters see their challenge and nothing of the submitters' reasoning
+        print("Your challenge: `qec.py assignment`. Facts: `qec.py fact <id>`; archived bundles are under the "
+              "project results directory.")
+        return
     facts = st.facts()
     print(f"## verified facts ({len(facts)} active)")
     for r in facts:
@@ -116,7 +129,7 @@ def c_status(cx, a):
     n = 60 if a.full else 15
     print(f"\n## recent shared memory (last {n}; full text: `qec.py memory search`)")
     for m in st.search_memory(limit=n):
-        if m["kind"] in ("guidance", "route_registry", "elaboration"):
+        if m["kind"] in ("guidance", "route_registry", "elaboration", "operating_rules"):
             continue
         print(f"  #{m['id']} r{m['round']} {m['kind']:<14} {m['author']:<10} {short(m['claim'], 110)}")
 
@@ -134,6 +147,8 @@ def c_assignment(cx, a):
 
 def c_memory(cx, a):
     st = cx.st
+    if cx.role == "refuter":
+        raise Denied("refuters work independently of the submitters' notes: shared memory is not available to them")
     if a.mem_cmd == "add":
         if a.kind not in AGENT_MEMORY_KINDS:
             raise Denied(f"memory kind '{a.kind}' cannot be added with `memory add` "
@@ -237,18 +252,49 @@ def c_done(cx, a):
 
 
 def c_revoke(cx, a):
-    cx.need("main", "reviewer", "human")
+    cx.need("main", "human")
     ids = cx.st.revoke(a.id, a.reason)
     cx.st.add_memory("review", cx.worker, f"revoked {len(ids)} fact(s): {', '.join(i[:12] for i in ids)}", a.reason)
     print("revoked: " + ", ".join(i[:12] for i in ids))
 
 
-def c_review(cx, a):
-    cx.need("reviewer", "human")
+def c_challenge(cx, a):
+    cx.need("main", "human")
+    focus = Path(a.focus_file).read_text() if a.focus_file else (a.focus or "")
+    if not focus.strip():
+        raise ValueError("give --focus or --focus-file: what the refuters should attack")
+    cid = cx.st.add_challenge(a.id, a.n, focus)
+    print(f"challenge #{cid} recorded: {a.n} independent refuter(s) will attack fact {a.id[:12]} after this turn")
+
+
+def c_refute(cx, a):
+    cx.need("refuter", "human")
+    x = cx.st.assignment(cx.worker) if cx.role == "refuter" else None
+    if cx.role == "refuter" and (x is None or f"challenge #{a.challenge}" not in x["text"]):
+        raise Denied(f"challenge #{a.challenge} is not assigned to you")
     text = read_text(a)
-    cx.st.set_review(a.id, a.status, {"by": cx.worker, "text": text})
-    cx.st.add_memory("review", cx.worker, f"review {a.status}: fact {a.id[:12]}", text, refs=[a.id])
-    print("review recorded")
+    ev = Path(a.evidence_file).read_text() if a.evidence_file else ""
+    cx.st.add_refutation(a.challenge, cx.worker, a.verdict, text, ev)
+    ch = cx.st.challenge(a.challenge)
+    cx.st.add_memory("refutation", cx.worker, f"{a.verdict}: fact {ch['fact_id'][:12]} (challenge #{a.challenge})",
+                     text, refs=[ch["fact_id"]])
+    print(f"verdict {a.verdict} recorded for challenge #{a.challenge}")
+
+
+def c_adjudicate(cx, a):
+    cx.need("human")
+    cx.st.adjudicate(a.id, a.uphold, a.reason)
+    print("refutation upheld: fact revoked" if a.uphold else "refutation rejected: fact stands")
+
+
+def c_runinfo(cx, a):
+    cx.need("human")
+    from archive import write_run_info, write_runs_index
+    if a.status:
+        cx.st.set("run_status", a.status)
+    if a.note:
+        cx.st.set("run_note", a.note)
+    print(f"written {write_run_info(cx.st)} and {write_runs_index()}")
 
 
 def c_novelty(cx, a):
@@ -276,12 +322,18 @@ def c_render(cx, a):
 
 def c_init(cx, a):
     cx.need("human")
+    from archive import record_init, write_run_info, write_runs_index
     cx.st.set("task_path", str(Path(a.task).resolve()))
     cx.st.set("status", "open")
     cx.st.set("round", 0)
     cx.st.set("origin", a.origin)
     cx.st.set("noise_p", a.noise_p)
-    print(f"project {cx.st.project} initialised at {cx.st.dir} (origin={a.origin}, noise p={a.noise_p})")
+    record_init(cx.st)
+    write_run_info(cx.st)
+    write_runs_index()
+    print(f"project {cx.st.project} initialised at {cx.st.dir} (origin={a.origin}, noise p={a.noise_p}, "
+          f"system v{cx.st.get('system_version')} at {str(cx.st.get('repo_head'))[:8]}"
+          f"{' DIRTY' if cx.st.get('repo_dirty') else ''})")
 
 
 def parser():
@@ -310,8 +362,16 @@ def parser():
         p = sp.add_parser(name); p.add_argument("--file"); p.add_argument("--text"); p.set_defaults(fn=c_doc)
     p = sp.add_parser("done"); p.add_argument("--reason", required=True); p.set_defaults(fn=c_done)
     p = sp.add_parser("revoke"); p.add_argument("id"); p.add_argument("--reason", required=True); p.set_defaults(fn=c_revoke)
-    p = sp.add_parser("review"); p.add_argument("id"); p.add_argument("--status", required=True, choices=["ok", "flagged"])
-    p.add_argument("--file"); p.add_argument("--text"); p.set_defaults(fn=c_review)
+    p = sp.add_parser("challenge"); p.add_argument("id"); p.add_argument("--n", type=int, default=1)
+    p.add_argument("--focus"); p.add_argument("--focus-file"); p.set_defaults(fn=c_challenge)
+    p = sp.add_parser("refute"); p.add_argument("challenge", type=int)
+    p.add_argument("--verdict", required=True, choices=["refuted", "doubtful", "no_problem_found"])
+    p.add_argument("--file"); p.add_argument("--text"); p.add_argument("--evidence-file"); p.set_defaults(fn=c_refute)
+    p = sp.add_parser("adjudicate"); p.add_argument("id"); g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--uphold", action="store_true"); g.add_argument("--reject", action="store_true")
+    p.add_argument("--reason", required=True); p.set_defaults(fn=c_adjudicate)
+    p = sp.add_parser("runinfo"); p.add_argument("--status", choices=["valid", "historical", "void"])
+    p.add_argument("--note"); p.set_defaults(fn=c_runinfo)
     p = sp.add_parser("novelty"); p.add_argument("id")
     p.add_argument("--status", required=True, choices=["prior_found", "no_prior_found"])
     p.add_argument("--file"); p.add_argument("--text"); p.set_defaults(fn=c_novelty)
@@ -323,7 +383,7 @@ def parser():
     return ap
 
 
-PATH_ARGS = ("file", "evidence_file", "dir")
+PATH_ARGS = ("file", "evidence_file", "dir", "focus_file")
 
 
 def _confine_paths(a, cwd, allowed_roots):

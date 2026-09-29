@@ -7,13 +7,19 @@ One round:
   0. the number of workers is fixed: min([orchestrator].max_workers, accounts
      with quota for the worker model); names w1..wN are stored as
      `workers_this_round` (the main agent sees only the names)
+     and written, with the other run conditions, as the round's
+     `operating_rules` memory (agents read it through `qec.py status`)
   1. main agent: reads the store, writes route registry, guidance and one
-     assignment per worker, or declares the task done
-  2. workers, in waves of as many processes as there are free accounts with
-     quota (parallelism changes speed, not results). A worker cut off by a
-     usage limit keeps its assignment open and is relaunched on another
-     account; one that fails otherwise is relaunched up to max_relaunch times
-  3. reviewer on newly accepted facts, 4. novelty auditor, 5. ledger rendered.
+     assignment per worker, opens challenges on facts (how many refuters, what
+     to attack), or declares the task done
+  2. workers and refuters, in waves of as many processes as there are free
+     accounts with quota (parallelism changes speed, not results). A process
+     cut off by a usage limit keeps its assignment open and is relaunched on
+     another account; one that fails otherwise is relaunched up to max_relaunch
+  3. ledger rendered.
+After the last round, a closing pass lets the main agent challenge facts that
+were never challenged; then refuters, the novelty auditor (on facts that are not
+refuted), the run archive (RUN_INFO.md, RUNS.md) and the network audit run.
 If no account has quota for a role, the loop sleeps --wait-hours, re-reads the
 quota and resumes. Operator limits live in config/models.toml, never in prompts.
 """
@@ -34,6 +40,8 @@ from launch import run  # noqa: E402
 from providers import NoCredential, load_config, free_accounts, unleased, invalidate_quota  # noqa: E402
 from render import render_ledger  # noqa: E402
 from service import Service  # noqa: E402
+from archive import write_run_info, write_runs_index  # noqa: E402
+from audit_network import audit  # noqa: E402
 
 
 def log(msg):
@@ -89,29 +97,62 @@ class Orchestrator:
                 continue
             return r
 
-    def workers_phase(self, st: Store, workers):
-        fails = {w: 0 for w in workers}
+    def open_refuters(self, st: Store) -> list:
+        """Turn the main agent's open challenges into refuter assignments."""
+        names = []
+        for ch in st.open_challenges():
+            for i in range(1, ch["n"] + 1):
+                name = f"rf{ch['id']}_{i}"
+                if st.assignment(name) is None and not st.con.execute(
+                        "SELECT 1 FROM assignments WHERE worker=?", (name,)).fetchone():
+                    st.assign(name, f"challenge #{ch['id']}: fact {ch['fact_id']}\n\n"
+                                    f"What the main agent asks you to attack:\n{ch['focus']}")
+                names.append(name)
+        return names
+
+    def process_phase(self, items):
+        """items: list of (role, name) with an open assignment each; run them in waves."""
+        fails = {n: 0 for _, n in items}
         max_relaunch = int(self.ocfg.get("max_relaunch", 2))
         while True:
             st = Store(self.a.project)
-            todo = [w for w in workers if st.assignment(w) is not None and fails[w] <= max_relaunch]
+            todo = [(r, n) for r, n in items if st.assignment(n) is not None and fails[n] <= max_relaunch]
             if not todo:
                 break
             cap = self.wait_for("worker")
             wave = todo[:cap]
-            log(f"worker wave: {wave} (capacity {cap}, pending {todo})")
+            log(f"wave: {[n for _, n in wave]} (capacity {cap}, pending {[n for _, n in todo]})")
             with ThreadPoolExecutor(max_workers=len(wave)) as ex:
-                results = dict(zip(wave, ex.map(lambda w: self.launch("worker", w), wave)))
+                results = dict(zip([n for _, n in wave], ex.map(lambda rn: self.launch(*rn), wave)))
             st = Store(self.a.project)
-            for w, r in results.items():
+            for n, r in results.items():
                 if r.get("is_error") or r.get("exit") not in (0, None):
-                    fails[w] += 1
-                    log(f"{w} failed (exit {r.get('exit')}); attempt {fails[w]} of {max_relaunch + 1}")
+                    fails[n] += 1
+                    log(f"{n} failed (exit {r.get('exit')}); attempt {fails[n]} of {max_relaunch + 1}")
                     continue
-                st.close_assignments("done", w)
-        n = Store(self.a.project).close_assignments("abandoned")
+                st.close_assignments("done", n)
+        st = Store(self.a.project)
+        n = st.close_assignments("abandoned")
         if n:
             log(f"{n} assignment(s) abandoned after repeated failures")
+        for ch in st.open_challenges():
+            st.close_challenge(ch["id"])
+
+    def round_rules(self, st: Store, workers, closing: bool = False) -> None:
+        per = int(self.ocfg.get("cpus_per_agent", 16))
+        lines = []
+        if closing:
+            lines.append("- This is the closing pass of the run: no worker assignments will be executed. Only open "
+                         "challenges on facts that should be attacked; do not write assignments.")
+        else:
+            lines.append(f"- Workers available this round: {', '.join(workers)}. Give each exactly one assignment.")
+        lines += [f"- Each process has {per} CPU cores; do not run more than {per} parallel jobs.",
+                  "- A single tool call is limited to about 10 minutes. Run longer jobs in the background, have them "
+                  "write a .done file, and wait for it before ending your turn.",
+                  "- Do not access the internet while solving (no web pages, no paper downloads, no package "
+                  "installation), by any means including scripts. Network access is logged. (The novelty auditor "
+                  "is exempt.)"]
+        st.set_operating_rules("all", "\n".join(lines))
 
     def main_phase(self) -> bool:
         for i in range(int(self.ocfg.get("main_attempts", 3))):
@@ -126,8 +167,34 @@ class Orchestrator:
         n = max(1, min(int(self.ocfg.get("max_workers", 6)), cap))
         ws = [f"w{i + 1}" for i in range(n)]
         st.set("workers_this_round", ws)
+        self.round_rules(st, ws)
         log(f"workers this round: {ws} (accounts usable for workers: {cap})")
         return ws
+
+    def closing(self):
+        st = Store(self.a.project)
+        pending = self.open_refuters(st)           # challenges opened in a round that ended early
+        if pending:
+            self.process_phase([("refuter", n) for n in pending])
+        st = Store(self.a.project)
+        if [f for f in st.facts() if f["refute_status"] == "unchallenged"]:
+            st.set("round", st.current_round() + 1)
+            st.set("workers_this_round", [])
+            self.round_rules(st, [], closing=True)
+            log(f"=== closing pass (round {st.current_round()}) ===")
+            self.main_phase()
+            st = Store(self.a.project)
+            st.close_assignments("abandoned")          # worker assignments are not run in the closing pass
+            self.process_phase([("refuter", n) for n in self.open_refuters(st)])
+        st = Store(self.a.project)
+        if [f for f in st.facts() if f["novelty_status"] == "pending"
+                and f["refute_status"] not in ("refuted_pending_human", "challenged")]:
+            self.launch("novelty", "novelty")
+        st = Store(self.a.project)
+        log("ledger: " + str(render_ledger(st)))
+        log(f"run info: {write_run_info(st)}; index: {write_runs_index()}")
+        out, flagged = audit(self.a.project)
+        log(f"network audit: {out} ({'FINDINGS: review by hand' if flagged else 'clean'})")
 
     def loop(self):
         a = self.a
@@ -148,18 +215,14 @@ class Orchestrator:
                 if st.get("status") == "done":
                     log("main agent declared the task done")
                     break
-                if not [w for w in workers if st.assignment(w) is not None]:
-                    log("no open assignments after the main agent; stopping")
+                if not [w for w in workers if st.assignment(w) is not None] and not st.open_challenges():
+                    log("no open assignments or challenges after the main agent; stopping")
                     break
-                self.workers_phase(st, workers)
-                st = Store(a.project)
-                if [f for f in st.facts() if f["review_status"] == "pending"]:
-                    self.launch("reviewer", "reviewer")
-                st = Store(a.project)
-                if [f for f in st.facts() if f["review_status"] == "ok" and f["novelty_status"] == "pending"]:
-                    self.launch("novelty", "novelty")
+                refuters = self.open_refuters(st)
+                self.process_phase([("worker", w) for w in workers] + [("refuter", n) for n in refuters])
                 log("ledger: " + str(render_ledger(Store(a.project))))
                 st = Store(a.project)
+            self.closing()
         finally:
             self.service.shutdown()
         log("orchestrator finished")

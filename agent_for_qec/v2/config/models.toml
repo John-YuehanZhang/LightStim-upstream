@@ -18,11 +18,11 @@ model = "opus"
 max_turns = 250
 wall_hours = 4.5
 
-[roles.reviewer]
+[roles.refuter]
 provider = "claude_oauth"
 model = "opus"
-max_turns = 80
-wall_hours = 1.0
+max_turns = 120
+wall_hours = 2.0
 
 [roles.novelty]
 provider = "claude_oauth"
@@ -59,7 +59,14 @@ max_workers = 6
 max_relaunch = 2
 # attempts of the main agent per round before the loop stops
 main_attempts = 3
+# subagents a process may run, from its account's remaining quota: [[min headroom, n], ...]
+subagent_thresholds = [[0.5, 2], [0.2, 1]]
 # every agent process is pinned (taskset) to its own block of cores
 cpus_per_agent = 16
 cpu_first = 0
 cpu_slots = 8
+
+[audit]
+# hosts the harness itself contacts; anything else in a solving role's proxy log is a finding
+harness_hosts = ["api.anthropic.com", "statsig.anthropic.com", "console.anthropic.com", "claude.ai",
+                 "sentry.io", "datadoghq.com", "api.deepseek.com", "downloads.claude.ai", "storage.googleapis.com"]

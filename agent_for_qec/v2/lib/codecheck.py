@@ -151,7 +151,8 @@ def _block_vectors(ps: stim.PauliString, blocks: List[List[int]], n: int) -> Tup
     return vecs, outside
 
 
-def check_logical_flows(flows: Sequence[str], S: np.ndarray, blocks: List[List[int]], kind: str) -> dict:
+def check_logical_flows(flows: Sequence[str], S: np.ndarray, blocks: List[List[int]], kind: str,
+                        resource: Sequence[int] = ()) -> dict:
     """Every Pauli in every flow must act only on block data qubits and be, block by
     block, in the normalizer. For kind 'logical_gate' and 'memory', inputs and outputs
     must each generate the full logical group of all blocks (2k per block); for
@@ -201,6 +202,22 @@ def check_logical_flows(flows: Sequence[str], S: np.ndarray, blocks: List[List[i
         if rin < need or rout < need:
             problems.append(f"declared flows do not generate the full logical group: input rank {rin}, "
                             f"output rank {rout}, needed {need} (2k per block)")
+    elif kind == "resource_gate":
+        # resource blocks (given states, e.g. magic states) are consumed: the outputs must
+        # generate the full logical group of the remaining blocks and not touch resource blocks
+        keep = [b for b in range(m) if b not in set(resource)]
+        if not resource:
+            problems.append("kind 'resource_gate' needs resource_blocks in submission.json")
+        mask = np.zeros(m * 2 * n, dtype=bool)
+        for b in resource:
+            mask[b * 2 * n:(b + 1) * 2 * n] = True
+        if any(o[mask].any() for o in outs):
+            problems.append("a flow output acts on a resource block (resource blocks are consumed)")
+        need_out = 2 * k * len(keep)
+        res["needed"] = need_out
+        if rout < need_out:
+            problems.append(f"declared flow outputs do not generate the full logical group of the non-resource "
+                            f"blocks: output rank {rout}, needed {need_out}")
     elif kind == "logical_measurement":
         if not measured:
             problems.append("no declared flow maps a non-trivial logical operator to measurement records")

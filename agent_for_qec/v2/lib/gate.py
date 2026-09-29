@@ -17,6 +17,12 @@ specification under test itself wherever the agent could otherwise choose it:
       of the declared code on the declared blocks. For gates and memories the
       flows' inputs and outputs each generate the full logical group (2k per
       block); for measurements a logical operator must map to measurement records.
+  P3b layout: every block that is not a resource block starts in the code (each
+      stabilizer generator is measured, `s -> 1` holds on the segment) and ends in
+      the code on the same data qubits (`1 -> s` holds): an operation must leave
+      each patch where and as it found it (e.g. a logical H must rotate the patch
+      back). Resource blocks (kind 'resource_gate', e.g. a given magic state) are
+      inputs only: the gate does not verify their preparation.
   P4  circuit-level distance: the gate strips all noise and injects its standard
       noise model (circuitops.standard_noise); the distance counts every
       observable of the circuit; exact value must equal the claim. Fault-tolerant
@@ -57,7 +63,8 @@ import sandbox  # noqa: E402
 
 PY = os.environ.get("QEC_PYTHON", "/home/yuehan/miniconda3/envs/light_stim/bin/python")
 RESULTS = Path(os.environ.get("QEC_RESULTS_ROOT", str(V2 / "results")))
-KINDS = {"code", "memory", "logical_gate", "logical_measurement"}
+KINDS = {"code", "memory", "logical_gate", "logical_measurement", "resource_gate"}
+CIRCUIT_FIELDS = {"name", "claimed_circuit_distance", "claim_type", "resource_blocks"}
 CLAIM_TYPES = {"exact", "at_least"}
 MAX_BUNDLE_BYTES = 20 * 1024 * 1024
 
@@ -121,6 +128,44 @@ def check_code(code: dict, claims: dict, timeout_s: float) -> dict:
     return out, S
 
 
+# ---------------------------------------------------------------- P3b
+def _pauli_on(row: np.ndarray, qubits: List[int]) -> str:
+    n = len(qubits)
+    parts = []
+    for loc, q in enumerate(qubits):
+        x, z = row[loc], row[n + loc]
+        if x or z:
+            parts.append(("Y" if x and z else "X" if x else "Z") + str(q))
+    return "*".join(parts)
+
+
+def check_layout(seg: stim.Circuit, S, blocks: List[List[int]], resource: set) -> dict:
+    """Each non-resource block must be in the code at the start and at the end of the
+    segment, on its declared qubits: for every stabilizer generator s placed on the
+    block, both `s -> 1` and `1 -> s` hold for some set of measurements."""
+    flows, tags = [], []
+    for b, qs in enumerate(blocks):
+        if b in resource:
+            continue
+        for i, row in enumerate(S):
+            ps = _pauli_on(row, qs)
+            if not ps:
+                continue
+            flows += [stim.Flow(f"{ps} -> 1"), stim.Flow(f"1 -> {ps}")]
+            tags += [(b, i, "start"), (b, i, "end")]
+    sols = seg.solve_flow_measurements(flows) if flows else []
+    bad_start = sorted({(b, i) for (b, i, w), s in zip(tags, sols) if s is None and w == "start"})
+    bad_end = sorted({(b, i) for (b, i, w), s in zip(tags, sols) if s is None and w == "end"})
+    out = {"pass": not bad_start and not bad_end, "checked_generators": len(flows) // 2,
+           "not_in_code_at_start": [f"block {b} stabilizer row {i}" for b, i in bad_start[:10]],
+           "not_in_code_at_end": [f"block {b} stabilizer row {i}" for b, i in bad_end[:10]]}
+    if not out["pass"]:
+        out["reason"] = (f"layout not restored: {len(bad_end)} stabilizer generator(s) do not hold at the end and "
+                         f"{len(bad_start)} are not measured at the start, on the declared block qubits "
+                         f"(the operation must leave every block on the same qubits in the same code)")
+    return out
+
+
 # ---------------------------------------------------------------- witness explanation
 def explain_witness(circuit: stim.Circuit, cols: List[int], limit: int = 12) -> List[str]:
     dem = circuit.detector_error_model(decompose_errors=False, flatten_loops=True)
@@ -176,7 +221,7 @@ def check_circuit(name: str, circuit: stim.Circuit, spec: dict, built: dict, S, 
     flows = built.get("flows") or []
     if S is not None and blocks:
         seg = logical_segment(circuit, data)
-        lf = check_logical_flows(flows, S, blocks, kind)
+        lf = check_logical_flows(flows, S, blocks, kind, resource=[int(i) for i in spec.get("resource_blocks") or []])
         out["P3_code_flows"] = {k: v for k, v in lf.items() if k != "problems"}
         problems += lf["problems"]
         if flows:
@@ -193,6 +238,18 @@ def check_circuit(name: str, circuit: stim.Circuit, spec: dict, built: dict, S, 
                 problems.append("flow check raised")
         else:
             problems.append("no flows declared")
+    # --- P3b layout restoration on the gate-derived segment
+    res_blocks = [int(i) for i in spec.get("resource_blocks") or []]
+    if S is not None and blocks:
+        if any(i < 0 or i >= len(blocks) for i in res_blocks):
+            problems.append("resource_blocks must be indices into blocks")
+        elif res_blocks and kind != "resource_gate":
+            problems.append("resource_blocks are only allowed for kind 'resource_gate'")
+        else:
+            lay = check_layout(logical_segment(circuit, data), S, blocks, set(res_blocks))
+            out["P3b_layout"] = lay
+            if not lay["pass"]:
+                problems.append(lay["reason"])
     # --- P4 distance on the gate-noised circuit, all observables
     if out.get("P2_dem", {}).get("pass"):
         claimed = spec.get("claimed_circuit_distance")
@@ -282,7 +339,7 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
         for c in spec.get("circuits") or []:
             if c.get("claim_type", "exact") not in CLAIM_TYPES:
                 raise ValueError(f"claim_type must be one of {sorted(CLAIM_TYPES)}")
-            extra = set(c) - {"name", "claimed_circuit_distance", "claim_type"}
+            extra = set(c) - CIRCUIT_FIELDS
             if extra:
                 raise ValueError(f"unknown circuit fields {sorted(extra)}")
         deps = [store.resolve_fact_id(d) for d in (spec.get("depends_on") or [])]
@@ -350,7 +407,7 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
     else:
         report["outcome"] = "accepted"
         fact_id = sub_id
-        claims = {k: spec.get(k) for k in ("code", "circuits", "description", "kind", "title")}
+        claims = {k: spec.get(k) for k in ("code", "circuits", "description", "kind", "title", "layer", "compared_to")}
         try:
             store.add_fact(fact_id, kind, spec.get("title"), claims, report, deps, sub_id, author,
                            origin=store.get("origin", "agent"))
@@ -384,4 +441,4 @@ def _log_verification(store, author: str, report: dict) -> None:
     if wits:
         ev += "\nlightest undetected logical error (first circuit): " + "; ".join(wits[0][:8])
     store.add_memory("verification", author, claim, ev,
-                     refs=[r for r in [report.get("fact_id"), report.get("submission_id")] if r])
+                     refs=list(dict.fromkeys(r for r in [report.get("fact_id"), report.get("submission_id")] if r)))

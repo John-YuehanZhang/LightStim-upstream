@@ -12,17 +12,20 @@ submission; an identical directory is recognised as a duplicate.
 
     {
       "title": "short name of the construction",
-      "kind": "code" | "memory" | "logical_gate" | "logical_measurement",
+      "kind": "code" | "memory" | "logical_gate" | "logical_measurement" | "resource_gate",
       "description": "the intended logical action in words, e.g. 'CNOT_L from block A to block B'",
       "code": {"n": 9, "k": 1, "d": 3},                 # your claims about the code
       "circuits": [
         {"name": "cnot_ZZ", "claimed_circuit_distance": 3, "claim_type": "exact"}
       ],
-      "depends_on": ["<fact id, at least 8 hex characters>", ...]
+      "depends_on": ["<fact id, at least 8 hex characters>", ...],
+      "layer": 1 | 2 | 3,                               # if the task defines layers
+      "compared_to": "the existing method this improves on, if the claim is a comparison"
     }
 
-Circuit entries accept only `name`, `claimed_circuit_distance` and
-`claim_type` (`"exact"`, the default, or `"at_least"`).
+Circuit entries accept only `name`, `claimed_circuit_distance`, `claim_type`
+(`"exact"`, the default, or `"at_least"`) and, for kind `resource_gate`,
+`resource_blocks` (see below).
 
 `build.py` defines `build()` returning:
 
@@ -57,6 +60,19 @@ What the gate does with it:
   and the flow outputs must each generate all 2k logical Paulis of every block;
   for `logical_measurement`, at least one flow must map a logical operator to
   measurement records (`... -> rec[-1] xor ...`).
+- Layout: every block must start in the code (its stabilizers are measured at
+  the start of the segment) and end in the code on the same data qubits (its
+  stabilizers hold at the end). An operation must leave each block where and
+  as it found it; for example, a logical gate that rotates or moves a patch
+  must bring it back.
+- Given resources (kind `resource_gate`): a block listed in the circuit's
+  `resource_blocks` (indices into `blocks`) holds a state that is given, not
+  prepared by you, for example an encoded magic state. In the circuit you may
+  prepare it in any stabilizer state so that the circuit is deterministic; the
+  gate removes that preparation from the segment and treats the block as an
+  input. Flow outputs must generate all logical operators of the other blocks
+  and must not act on resource blocks (they are consumed). The resource
+  itself is not verified; the table records the assumption.
 - Distance: the exact circuit-level distance of the re-noised circuit, counting
   every observable in the circuit, must equal your claim (or be at least the
   claim for `at_least`). The circuit is fault-tolerant at this instance iff the

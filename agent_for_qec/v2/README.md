@@ -28,19 +28,19 @@ HiGHS (a SAT/LRAT certificate for the final rows is planned).
 
 | check | who | output |
 |---|---|---|
-| specification faithfulness: the flows describe the intended gate, the noise model and rounds are adequate, the failure-mode list | reviewer role | `review_status` ok / flagged, text |
-| platform suitability (superconducting 2D, neutral atoms, trapped ions) | gate statistics + reviewer paragraph | ledger column |
+| does the fact deliver what the task asks, do the flows describe the claimed operation, are comparisons and assumptions sound (whatever a program cannot decide) | refuters: independent processes the main agent sets on a fact (how many, what to attack) | `refute_status`; a refuted fact stays in the store and is listed separately until the human decides (`qec.py adjudicate`) |
+| platform suitability (superconducting 2D, neutral atoms, trapped ions) | gate statistics; analysis after construction | ledger column |
 | novelty | novelty role (web search after the result exists) + human sign-off | `novelty_status`: prior_found / no_prior_found / human_confirmed_new |
 
 ## Roles and processes
 
 | role | runs | may | may not |
 |---|---|---|---|
-| main | once per round | read everything; publish route registry and guidance; assign workers; declare done | submit candidates; use the web |
+| main | once per round (+ closing pass) | read everything; publish route registry and guidance; assign workers; open challenges (number of refuters, focus); declare done | submit candidates; use the web |
 | worker | in parallel, one per assignment | build and test; submit to the gate; write memory | use the web; edit the gate or LightStim |
-| reviewer | after workers, if facts await review | review, revoke | use the web |
-| novelty | after review | search the web; record novelty reports | mark anything "new" |
-| human | any time | init projects, sign facts as new, everything else | |
+| refuter | with the workers, one per challenge slot | attack one fact; record refuted (with a reproducible script) / doubtful / no_problem_found | read the workers' shared memory; use the web; revoke |
+| novelty | at the end of the run | search the web; record novelty reports on facts that are not refuted | mark anything "new" |
+| human | any time | init projects, adjudicate refutations, sign facts as new, set run status | |
 
 Isolation (enforced, not requested in prompts):
 
@@ -86,7 +86,7 @@ Accepted submissions are archived with the gate verdict in
 ## Prompts (for the paper)
 
 All prompts are English and version-controlled in `prompts/`:
-`main.md`, `worker.md`, `reviewer.md`, `novelty.md`, `shared/submission_format.md`,
+`main.md`, `worker.md`, `refuter.md`, `novelty.md`, `shared/submission_format.md`,
 and the domain files `domain/angles.md` and `domain/pitfalls.md` (placeholders
 to be rewritten by the operator). The exact text sent to every process is
 archived as `$QEC_RUNTIME_ROOT/<project>/prompts_used/<sha>_<role>.md` and its
@@ -99,7 +99,7 @@ SHA is recorded in the `runs` table.
 `anthropic_api`, `deepseek` (Anthropic-compatible endpoint, runs in Claude
 Code), `openai` (needs the Codex CLI harness; not implemented yet).
 
-## Operator policy (never in prompts)
+## Operator policy (never in prompts; given to agents as `operating_rules` memory)
 
 Resource and scheduling rules are operator knowledge, kept in code and
 `config/models.toml`, never in the published prompts:
@@ -115,6 +115,14 @@ Resource and scheduling rules are operator knowledge, kept in code and
 - `max_relaunch`, `main_attempts`, CPU pinning (`cpus_per_agent`, `cpu_first`,
   `cpu_slots`).
 - Parallelism changes speed, not results.
+- The orchestrator writes these conditions into the store as `operating_rules`
+  memory (round-wide: workers, cores, tool-call limit, no internet while
+  solving; per process: number of subagents from its account's quota). Agents
+  see them at the top of `qec.py status`; the prompts only say to follow them.
+- Network: every agent process runs behind a recording proxy (`lib/netlog.py`);
+  `runner/audit_network.py` lists non-harness destinations and network code in
+  transcripts (`results/<project>/NETWORK_AUDIT.md`), run automatically at the
+  end of each orchestrator run.
 
 ## Running
 
@@ -132,3 +140,23 @@ $PY agent_for_qec/v2/runner/launch.py --project P --role worker --worker w1 --dr
 Tests (gate fixtures, exploits, store, roles, socket service, launcher,
 agent sandbox, quota bookkeeping; no model calls):
 `QEC_TEST_TMP=<scratch> PYTHONPATH=. $PY agent_for_qec/v2/tests/run_tests.py`.
+
+## Run archive
+
+`$QEC_RUNTIME_ROOT/RUNS.md` indexes every project (version, commit, status,
+note); each project has `RUN_INFO.md` (written at init and at the end of each
+run; `qec.py runinfo --status valid|historical|void --note ...`). Only runs
+marked valid may be used in the paper. Read RUNS.md before any result.
+
+## Version history
+
+- v2.0 (2393019, 2085fce): orchestrated main/worker/reviewer/novelty, gate, store.
+- v2.1 (d2c5d76, fcd012d): gate hardened after review (gate-derived noise and
+  segment, blocks, sandboxed build), agent processes in bubblewrap, socket
+  service, quota-aware waves, resource budget removed from prompts.
+- v2.2: operating rules as agent memory; subagents restored under those rules;
+  pitfalls reduced to check items (no results); refuters replace the reviewer,
+  refuted facts listed separately for human decision; gate check P3b (blocks
+  back on the same qubits in the same code); `resource_gate` kind for given
+  magic states; recording proxy and network audit; run archive; ledger by
+  section with layer and assumed resources.
