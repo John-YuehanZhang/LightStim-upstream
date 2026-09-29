@@ -26,42 +26,28 @@ STATUS: RUNNING
   - 发现的流程问题：(1) 逻辑段 flow 检查必须把数据初始化/读出从与 ancilla 合并的 R/M 指令里剔除（第一版脚本因此全部 flow=False）；(2) `CNOTTransExperiment` 默认 `offset_target=(6,0)` 在 d=5 时两个 patch 的 x 范围交叠（control 0–8，target 6–16；坐标本身不冲突，qubit 数 80=80），平台报告的"距离"会失真，本阶段显式用 (2d+2,0)；(3) 超出 d=5 的精确电路级距离仍是瓶颈（记忆 d=7 在 1500 s 超时）。
   - 文献核查（WebSearch，3 组关键词）：hook/调度 → Dennis et al. 2002、Tomita & Svore 2014、arXiv:2602.09099、arXiv:2603.01628；横向 CNOT 解码 → arXiv:2408.01393（PRX Quantum 6, 020326）、arXiv:2407.20976、arXiv:2505.13599。全部是已知对象，符合"校准"。
 
+
+- **Phase 1a（agent，2026-09-29）**：精确电路级距离求解器提速 + 选定 Phase 1b 目标。
+  - 产出：`tools/circuit_distance_fast.py`（新文件，未改 verify_stack），`phase1/solver_benchmark.{py,out}`，`phase1/candidate_probe.{py,out}`，`phase1/cnot_d7_bounds.py` + `phase1/cnot_d7_*.out`。
+  - 方法：(a) 检测器子集松弛——只保留子集 S 的检测器约束（CSS 电路取"数据比特 X 错误能翻转的检测器"=Z 型半边），合并投影后相同的机制、丢弃投影为空的机制；每个全问题解都是松弛问题的解 ⇒ 松弛最优值是**证明过的下界**。投影后若全部机制 ≤2 个检测器，用奇偶提升图上的 BFS 精确求解（min_v dist((v,0),(v,1))，含边界点）；否则用 MILP。上界：把松弛最优解提升回原机制（每个合并类取 S 外检测器最少的代表），对完整 H、L 复核通过即为上界；LB=UB 即精确。下界按观测量分别取（每行取各子集的最大值，总下界取各行最小）。(b) 全问题 MILP 可行性"是否存在权 ≤ub−1"：d=7 记忆 1800 s 超时，**无效**。(c) 轮数扫描：d=7 在 rounds=1/2/3/7 上都是 7（只作旁证，不作证明）。(d) 超时一律登记区间 [lb, ub]。
+  - 关键数字：旋转码记忆（perpendicular）d=5…15 两个基全部精确等于 d，d=7 用 0.2 s（旧 MILP 1500 s 超时），d=15（66k 机制）19 s；与 Phase 0 的 18 个已知精确值（含非 FT 的 2/3/(d+1)/2）零分歧；横向 CNOT d=5 四种组合精确 5，用 4–7 s（全 MILP 510–1270 s）；横向 CNOT d=7（23.8k 机制）：四种组合都只证到区间 [3, 7]（ub=7 为复核过的提升见证；每个 patch 单独投影后是图问题，但只对"不经过 CNOT 传播"的那个观测量给出 7，例如 ZZ 测量的 obs0；跨 patch 的观测量需要含超边（度 4）的投影 MILP，500 s 超时，对偶界 3）。stim 搜索在 d=7 上跑不完，已加开关 `use_stim_search=False`。
+  - 独立审查（子 agent 逐条审数学正确性）：松弛下界、图 BFS、见证复核、可行性 MILP 均无问题；但发现 `verify_stack.min_weight_vector_milp` 在**超时**路径上可能高估下界（跳过的行/未知行被忽略，状态 3/4 被当成不可行）。快速工具因此自带 `_milp_min`（逐行严格计账）。verify_stack 未改（本阶段规则），README 已注明：该函数 status=timeout 时的 proven_lower_bound 不可用，status=exact 不受影响。
+  - 局限：投影后仍有超边（BB 的权 6 检验：单个数据错误翻 3 个检验；横向 CNOT 时刻跨两个 patch 的错误）时退回 MILP，规模上去就超时。BB [[72,12,6]] 记忆 Z 基（16k 机制，12 个观测量）1800 s 内只得到 ub=6、lb 未证（X 基整体 3600 s 超时未跑到）。4D det5 记忆（5.9k 机制，投影超边度 6）精确 4 用 25 s。
+  - 目标选择：**候选 A（4D 几何码 det3 [[18,6,3]] / det5 [[30,6,4]]）**。理由：(1) 可精确验证——记忆电路距离 det3=3（4 s）、det5=4（25 s），两个基都满距离，原生 SE 块 `FourDGeoCodeExtractionBlock` 即可用；(2) 候选 C 被求解器卡住（BB 记忆的下界都证不出，门电路只会更大）；(3) 候选 B 的 [[13,1,3]] 就是 d=3 非旋转表面码、[[18,2,3]] 是 d=3 环面码，它们的 fold-transversal H 早已有文献，空白可信度低。风险：arXiv:2506.15130（4D geometric codes 的容错量子计算机）声称给出了 4D 码"完整的逻辑 Clifford 操作集"，主要针对 [[96,6,8]] Hadamard 格点；小实例 det3/det5 上"每个生成元的电路级距离精确等于 d"是否已被报告，Phase 1b 第一步必须精读该文确认。
+  - 文献（WebSearch）：arXiv:2506.15130（4D 几何码，含逻辑 Clifford 全集）；arXiv:2407.03973（BB 码的 logical 与 fold-transversal 门）；arXiv:2506.03094（Tour de gross，BB 码指令集含自同构）；Quintavalle et al., Quantum 7, 1153 (2023)（HGP 分区逻辑门）；arXiv:2603.22532（Webster, Jacob, Higgott：码与电路距离算法综述——我们的松弛下界属于其中"精确算法 + 界"的范畴，工具本身不作为新结果登记）。
+
 ## 下一阶段
 
-### Phase 0 收尾（上次运行在 d=5 计算跑完前结束了回合，以下未完成；先做这个，做完提交，再做 Phase 1a）
+### Phase 1b：4D 几何码 det3 [[18,6,3]] / det5 [[30,6,4]] 的逻辑 Clifford 生成集——先文献，后构造
 
-1. 横向 CNOT d=5 的四个电路级距离结果：若 `/tmp/ct_d5_*.out` 还在且已写完就直接用；否则重跑 `phase0/cnot_trans_verify.py` 的 d=5 部分（前台、`timeout 3600`）。把 d=3 和 d=5 的完整输出保存为 `phase0/cnot_trans_verify.out`。
-2. 把"已完成"里 Phase 0 段落的占位符 `D5_SUMMARY` 换成真实数字。
-3. LEDGER.md 目前只有 C-001…C-008，补上横向 CNOT 的行（C-009 起，至少覆盖 d=3/5 × ZZ/XX/XZ→ZZ/XZ→XX，写清 flow 结果、精确电路级距离、平台报告）。
-4. `git add agent_for_qec/` 并提交（一个提交，英文信息）。
+1. 文献核查（先做，结论写进 PROGRESS/LEDGER）：精读 arXiv:2506.15130 的逻辑门部分（WebFetch 取 abs/HTML），回答：它给出的 Clifford 生成元是什么（自同构置换、fold-transversal H/S、块间横向 CNOT？）；是否覆盖 det3/det5；是否报告了电路级距离（精确值还是 LER）。再用至少 3 组关键词搜 "4D geometric code logical gate circuit distance"、"loop-only 4D toric code fold transversal"、"[[30,6,4]] code automorphism logical Clifford"。如果 det3/det5 上的生成元及精确电路级距离已发表，本候选降为"已有"类，直接转去候选 A'（同族 det9 [[54,6,6]]，先用 `candidate_probe.py` 测其记忆电路距离能否精确求解）或回到候选池。
+2. 自同构：用 `FourDGeoCode(L=...)` 取 Hx/Hz，在 n=18/30 上穷举保持 (Hx,Hz) 行空间的数据比特置换（先用格点平移 Z^4/ΛZ^4 和坐标置换/符号翻转生成候选，再用 GF(2) 秩检验是否保码），计算每个自同构在 6 个逻辑比特上的辛作用（写成 12×12 GF(2) 矩阵），求它们生成的群。脚本 `phase1/four_d_automorphisms.py`，输出 `.out`。
+3. 若有交换 X/Z 型的对偶（fold）：检查 Hx 与 Hz 在某个置换下互换，构造 fold-transversal H（物理 H + 置换）与 S 型（CZ/S 层），用 `logical_flow_string` 验证签名作用。
+4. 块间横向 CNOT：沿用 `phase0/cnot_trans_verify.py` 的框架（`CNOTTransExperiment` 若不支持 4D 码，就用 builder-tracker API 手搭：两块 + 横向 CX 层 + 两侧各 d 轮 SE），flow + 电路级距离（`circuit_distance_fast`，按 patch 分的检测器子集放进 `extra_subsets`）。
+5. 每个门：码距离、签名 flow（6 个 logical × X/Z，含反例对照）、无噪声检查、电路级距离（精确，超时写区间）、平台报告；每个通过验证的候选按规则 6 立即做文献核查后登记 LEDGER。
+6. 本阶段不求做完所有门：优先"自同构群作用 + 一个具体门的完整验证链"，其余写进下一阶段。
 
-### Phase 1a：精确电路级距离求解器提速 + 选定第一个探索目标（先做工具，后做探索）
+### 候选池（未选）
 
-背景：Phase 0 表明 MILP 在 ~5k 机制时就会超时，而下面三个候选的 DEM 都更大。没有精确判据就不能登记任何候选，所以 Phase 1 第一步是工具。
-
-1. 在 `agent_for_qec/tools/verify_stack.py` 旁边新增 `tools/circuit_distance_fast.py`（不要改 verify_stack 已有函数的行为），尝试以下加速并在旋转表面码记忆 d=7（perpendicular，Z 基）上比较用时，目标是在 3600 s 内证出 7：
-   a. 按观测量分解：CSS 电路里对 Z 观测量只保留会翻转它的机制所在的 X 型检测器子问题（`decompose_errors` 前按检测器基分块），问题规模约减半；
-   b. 用 stim 搜索得到的上界 ub，在 MILP 里加 `sum e <= ub-1` 并作可行性问题求解（证 infeasible 往往比优化快）；
-   c. 轮数下界论证：对记忆与横向门，先在 rounds=1..3 上算距离，确认空间方向距离与轮数无关后，只在 rounds=d 上做一次；
-   d. 若仍超时，记录 dual bound，作为"≥k"登记，不要谎报精确值。
-   把对照表写进 `phase1/solver_benchmark.out`，结论写进 README 的"Exactness"段落。
-2. 用新求解器补证 LEDGER C-001/C-002 的 d=7（若成功则更新该两行）。
-3. 在下列三个候选中选一个作为 Phase 1b 的目标（选择标准：实现代价、DEM 规模能否被新求解器精确求解、文献空白的可信度），写明理由；本阶段**不开始构造**。
-
-候选（Phase 1b 起逐个做；每个都要先做文献核查再动手）：
-
-- **候选 A：4D 几何码 [[18,6,3]] / [[30,6,4]]（`lightstim/qec_code/four_d_geo_code`, configs `det3`/`det5`）上的逻辑 Clifford 生成集。**
-  - 目标逻辑操作：由码自同构（格点平移/坐标置换）给出的比特置换型逻辑门 + 横向 CNOT（两块之间），以及块内 fold 型 H/S。
-  - 可能的空白：原始论文（4D geometric codes, Berthusen et al.）报告了码参数与记忆 LER，未见针对这些小实例给出"全部逻辑 Clifford 生成元 + 电路级距离精确等于 d"的构造。需先核查（关键词：4D geometric code logical gates automorphism / fold transversal / Hadamard code 4D）。
-  - 实现：`extend-new-code` skill 中的 LogicalOpSet 注册方式；自同构从 Hx/Hz 的置换对称性用小规模图同构搜索得到（n≤30 可穷举）；置换门用重标号（无物理门）或 SWAP 网络，两块之间的门用横向 CNOT。
-  - 验证：`code_distance_from_patch`（n≤30 z3 秒级）；每个逻辑门的 6 个 logical 的 12 条签名 flow；SE 调度先用 `GenericCSSColorationExtractionBlock` 测电路距离，若 < d，用 hook 规则（Phase 0）搜索检验内 CNOT 顺序，直到记忆和每个门的电路距离都精确等于 d。
-
-- **候选 B：小 HGP 码 [[13,1,3]] / [[18,2,3]]（`lightstim/qec_code/HGP/instances.py`）上的 fold-transversal H 与块间横向 CNOT，电路级距离精确验证。**
-  - 可能的空白：HGP 的保距测量调度已有（Manes & Claes 2023, "Distance-preserving stabilizer measurements in hypergraph product codes"）；HGP 上的 fold/分区逻辑门也有（Quintavalle et al. 2023, "Partitioning qubits in hypergraph product codes to implement logical gates"），但这些工作多为码容量/现象学分析，"门电路 + SE 一起"的精确电路级距离可能没人报告过。空白可信度中等，先核查。
-  - 实现：HGP 的 SE 用 LightStim 现有 `HGP/SE_block.py`（先测电路距离）；fold 需要 H1=H2 的对称实例（[[13,1,3]] 是 H1=H2 的重复码型）；门 = 物理 H + 按折叠对称的 SWAP/CZ 层。
-  - 验证：签名 flow（X_L↔Z_L）；电路级距离 = 3（DEM 小，MILP 秒级）。
-
-- **候选 C：BB 码 [[72,12,6]] 块内自同构 CNOT / 块间横向 CNOT 的电路级距离精确值。**
-  - 可能的空白：Bravyi et al. 2024（arXiv:2308.07915）只给出 [[144,12,12]] 的 SE 电路距离上界 ≤10，自同构门（Malcolm et al. 2024、Sayginel et al. 2024 "Fault-tolerant logical Clifford gates from code automorphisms"）多以 LER 评估；[[72,12,6]] 上"SE + 自同构门"整体电路距离的精确证明可能是空白。先核查。
-  - 实现：`BB_code/SE_block.py` 的深度 8 调度；自同构门 = 数据比特循环移位（重标号或 SWAP），块间横向 CNOT 与 Phase 0 同一脚本框架。注意 `logical_presets.py` 只有 [[144,12,12]] 的 logical 预设，[[72,12,6]] 需要自己算 logical 基（高斯消元）。
-  - 验证：码距离 6（z3/MILP）；12 个逻辑比特 × 2 的签名 flow；电路级距离 = 6——DEM 约万级机制，**依赖 Phase 1a 的求解器提速**，否则只能登记"≥k"。
+- 候选 B（小 HGP [[13,1,3]]/[[18,2,3]] fold-H）：两者分别是 d=3 非旋转表面码与环面码，fold-transversal 门已有文献（Moussa 2016；Breuckmann & Burton 的 fold-transversal 系列；Quintavalle et al. 2023），空白可信度低；记忆电路距离均精确 3（<1 s），工具上随时可做。
+- 候选 C（BB [[72,12,6]] 自同构/横向 CNOT）：被求解器卡住。前置工作：超边问题的精确求解（例如在奇偶提升图上做带耦合约束的流 MILP，或 MaxSAT），先在 BB 记忆 Z 基上证出 lb=6。相关文献：arXiv:2308.07915、arXiv:2407.03973、arXiv:2506.03094、Sayginel et al. 2024。

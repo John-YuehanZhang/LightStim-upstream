@@ -1,0 +1,11 @@
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/cnot_d7_bounds.py ZZZZ
+    relax extra0 obs0: {'lb': 7, 'method': 'graphlike-bfs', 'sec': 0.5, 'lift_ok': True, 'lift_w': 7, 'S': 360, 'cols': 1723, 'maxdeg': 2}
+    relax extra0 obs1: {'lb': 1, 'method': 'graphlike-bfs', 'sec': 0.1, 'lift_ok': False, 'lift_w': None, 'S': 360, 'cols': 1728, 'maxdeg': 2}
+    relax extra1 obs1: {'lb': 1, 'method': 'graphlike-bfs', 'sec': 0.1, 'lift_ok': False, 'lift_w': None, 'S': 360, 'cols': 1744, 'maxdeg': 2}
+    relax extra2 obs1: {'lb': 1, 'method': 'graphlike-bfs', 'sec': 0.1, 'lift_ok': False, 'lift_w': None, 'S': 312, 'cols': 1697, 'maxdeg': 2}
+    relax extra3 obs1: {'lb': 1, 'method': 'graphlike-bfs', 'sec': 0.1, 'lift_ok': False, 'lift_w': None, 'S': 312, 'cols': 1825, 'maxdeg': 2}
+    relax Xdata-sensitive obs1: {'lb': 3, 'method': 'projected-milp-dualbound', 'sec': 500.3, 'lift_ok': True, 'lift_w': 7, 'S': 720, 'cols': 3489, 'maxdeg': 4, 'milp_status': 'timeout'}
+    relax Zdata-sensitive obs1: {'lb': 1, 'method': 'projected-milp', 'sec': 0.2, 'lift_ok': False, 'lift_w': None, 'S': 624, 'cols': 3551, 'maxdeg': 4, 'milp_status': 'exact'}
+    feasibility(<= 6): timeout 0s
+E d=7 init=ZZ meas=ZZ: lb=3 ub=7 status=bounds lb_by=relax:Xdata-sensitive:projected-milp-dualbound ub_by=lifted:extra0:obs0 mech=23803 dets=1344 sec=504 feas=[(6, 'timeout', 0.0)] row_lb={0: 7, 1: 3} relax={'extra0:obs0': (7, 'graphlike-bfs', 1723, 2, 0.5, None), 'extra0:obs1': (1, 'graphlike-bfs', 1728, 2, 0.1, None), 'extra1:obs1': (1, 'graphlike-bfs', 1744, 2, 0.1, None), 'extra2:obs1': (1, 'graphlike-bfs', 1697, 2, 0.1, None), 'extra3:obs1': (1, 'graphlike-bfs', 1825, 2, 0.1, None), 'Xdata-sensitive:obs1': (3, 'projected-milp-dualbound', 3489, 4, 500.3, 'timeout'), 'Zdata-sensitive:obs1': (1, 'projected-milp', 3551, 4, 0.2, 'exact')}
+EXIT 0

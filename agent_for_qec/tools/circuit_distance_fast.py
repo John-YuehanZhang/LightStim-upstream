@@ -384,7 +384,7 @@ def stim_upper_bound(circuit: stim.Circuit, H, L, keys, max_size: int = 6) -> Tu
 def fast_circuit_distance(circuit: stim.Circuit, *, data_qubits: Optional[Sequence[int]] = None,
                           observables: Optional[Sequence[int]] = None,
                           extra_subsets: Sequence[Sequence[int]] = (),
-                          ub_hint: Optional[int] = None,
+                          ub_hint: Optional[int] = None, use_stim_search: bool = True,
                           milp_time_s: float = 1800.0, verbose: bool = False) -> FastDistanceResult:
     t0 = time.time()
     dem = circuit.detector_error_model(decompose_errors=False, flatten_loops=True,
@@ -427,7 +427,8 @@ def fast_circuit_distance(circuit: stim.Circuit, *, data_qubits: Optional[Sequen
             lifted = r.detail.pop("lifted", None)
             lift_ok = lifted is not None and _check(H, Lj, lifted)
             detail[f"relax:{name}:obs{j}"] = dict(lb=r.lb, method=r.method, sec=round(r.seconds, 1),
-                                                  lift_ok=lift_ok, **r.detail)
+                                                  lift_ok=lift_ok, lift_w=len(lifted) if lift_ok else None,
+                                                  **r.detail)
             if verbose:
                 print(f"    relax {name} obs{j}: {detail[f'relax:{name}:obs{j}']}", flush=True)
             if r.lb > row_lb[j]:
@@ -441,7 +442,7 @@ def fast_circuit_distance(circuit: stim.Circuit, *, data_qubits: Optional[Sequen
         lb, lb_method = 10 ** 9, "no-logical"
     detail["row_lb"] = row_lb
     # ---------- upper bound from stim's search if the lifted witnesses did not close it
-    if ub is None or lb < ub:
+    if use_stim_search and (ub is None or lb < ub):
         w, cols = stim_upper_bound(circuit, H, L, keys)
         if cols is not None and (ub is None or w < ub):
             ub, wit, ub_method = w, cols, "stim-search"

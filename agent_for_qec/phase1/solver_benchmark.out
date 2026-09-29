@@ -1,0 +1,69 @@
+# Phase 1a solver benchmark. Parts A,B,D,E35 run with the final tools/circuit_distance_fast.py; part C (full-problem MILP feasibility) is independent of the driver.
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/solver_benchmark.py A
+## A. cross-check vs Phase 0 MILP
+A d=3 Z perpendicular known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=219 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (3, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 X perpendicular known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=221 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (3, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 Z swapped known=2 agree=True: lb=2 ub=2 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=205 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (2, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 X swapped known=2 agree=True: lb=2 ub=2 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=197 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (2, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 Z parallel known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=199 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (3, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 X parallel known=2 agree=True: lb=2 ub=2 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=215 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (2, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 Z generic_coloration known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=223 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (3, 'graphlike-bfs', 55, 2, 0.0)}
+A d=3 X generic_coloration known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=225 dets=24 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (3, 'graphlike-bfs', 55, 2, 0.0)}
+A d=5 Z perpendicular known=5 agree=True: lb=5 ub=5 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=1677 dets=120 sec=0.1 t_ub=0.1 feas=None relax={'Xdata-sensitive:obs0': (5, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 X perpendicular known=5 agree=True: lb=5 ub=5 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=1679 dets=120 sec=0.1 t_ub=0.1 feas=None relax={'Zdata-sensitive:obs0': (5, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 Z swapped known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=1611 dets=120 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (3, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 X swapped known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=1605 dets=120 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (3, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 Z parallel known=5 agree=True: lb=5 ub=5 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=1583 dets=120 sec=0.1 t_ub=0.1 feas=None relax={'Xdata-sensitive:obs0': (5, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 X parallel known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=1611 dets=120 sec=0.0 t_ub=0.0 feas=None relax={'Zdata-sensitive:obs0': (3, 'graphlike-bfs', 301, 2, 0.0)}
+A d=5 Z generic_coloration known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:projected-milp ub_by=lifted:Xdata-sensitive:obs0 mech=1652 dets=120 sec=0.4 t_ub=0.4 feas=None relax={'Xdata-sensitive:obs0': (3, 'projected-milp', 301, 4, 0.3)}
+A d=5 X generic_coloration known=3 agree=True: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=1657 dets=120 sec=0.2 t_ub=0.2 feas=None relax={'Zdata-sensitive:obs0': (3, 'projected-milp', 301, 4, 0.2)}
+A d=7 Z generic_coloration known=5 agree=True: lb=5 ub=5 status=exact lb_by=relax:Xdata-sensitive:projected-milp ub_by=lifted:Xdata-sensitive:obs0 mech=5403 dets=336 sec=3.0 t_ub=3.0 feas=None relax={'Xdata-sensitive:obs0': (5, 'projected-milp', 883, 4, 2.9)}
+A d=7 X generic_coloration known=5 agree=True: lb=5 ub=5 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=5393 dets=336 sec=35.2 t_ub=35.2 feas=None relax={'Zdata-sensitive:obs0': (5, 'projected-milp', 883, 4, 35.0)}
+A: disagreements=0
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/solver_benchmark.py B
+## B. perpendicular memory, fast route
+B d=5 Z perpendicular: lb=5 ub=5 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=1677 dets=120 sec=0.1 t_ub=0.1 feas=None relax={'Xdata-sensitive:obs0': (5, 'graphlike-bfs', 301, 2, 0.0)}
+B d=5 X perpendicular: lb=5 ub=5 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=1679 dets=120 sec=0.1 t_ub=0.1 feas=None relax={'Zdata-sensitive:obs0': (5, 'graphlike-bfs', 301, 2, 0.0)}
+B d=7 Z perpendicular: lb=7 ub=7 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=5471 dets=336 sec=0.3 t_ub=0.3 feas=None relax={'Xdata-sensitive:obs0': (7, 'graphlike-bfs', 883, 2, 0.1)}
+B d=7 X perpendicular: lb=7 ub=7 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=5473 dets=336 sec=0.3 t_ub=0.3 feas=None relax={'Zdata-sensitive:obs0': (7, 'graphlike-bfs', 883, 2, 0.1)}
+B d=9 Z perpendicular: lb=9 ub=9 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=12705 dets=720 sec=1.0 t_ub=1.0 feas=None relax={'Xdata-sensitive:obs0': (9, 'graphlike-bfs', 1945, 2, 0.7)}
+B d=9 X perpendicular: lb=9 ub=9 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=12707 dets=720 sec=1.0 t_ub=1.0 feas=None relax={'Zdata-sensitive:obs0': (9, 'graphlike-bfs', 1945, 2, 0.7)}
+B d=11 Z perpendicular: lb=11 ub=11 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=24483 dets=1320 sec=3.1 t_ub=3.1 feas=None relax={'Xdata-sensitive:obs0': (11, 'graphlike-bfs', 3631, 2, 2.4)}
+B d=11 X perpendicular: lb=11 ub=11 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=24485 dets=1320 sec=3.4 t_ub=3.4 feas=None relax={'Zdata-sensitive:obs0': (11, 'graphlike-bfs', 3631, 2, 2.7)}
+B d=13 Z perpendicular: lb=13 ub=13 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=41909 dets=2184 sec=8.4 t_ub=8.4 feas=None relax={'Xdata-sensitive:obs0': (13, 'graphlike-bfs', 6085, 2, 6.7)}
+B d=13 X perpendicular: lb=13 ub=13 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=41911 dets=2184 sec=8.3 t_ub=8.3 feas=None relax={'Zdata-sensitive:obs0': (13, 'graphlike-bfs', 6085, 2, 6.9)}
+B d=15 Z perpendicular: lb=15 ub=15 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=66087 dets=3360 sec=18.9 t_ub=18.9 feas=None relax={'Xdata-sensitive:obs0': (15, 'graphlike-bfs', 9451, 2, 16.2)}
+B d=15 X perpendicular: lb=15 ub=15 status=exact lb_by=relax:Zdata-sensitive:graphlike-bfs ub_by=lifted:Zdata-sensitive:obs0 mech=66089 dets=3360 sec=18.9 t_ub=18.9 feas=None relax={'Zdata-sensitive:obs0': (15, 'graphlike-bfs', 9451, 2, 16.1)}
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/solver_benchmark.py C
+## C. d=7 Z perpendicular: full-problem MILP feasibility (weight <= 6?)
+C feasibility(<=6) full problem: timeout sec=1800 (Phase 0 optimisation MILP: timeout at 1500 s)
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/solver_benchmark.py D
+## D. rounds scan (evidence only)
+D d=7 Z rounds=1: lb=7 ub=7 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=163 dets=48 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (7, 'graphlike-bfs', 163, 2, 0.0)}
+D d=7 Z rounds=2: lb=7 ub=7 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=987 dets=96 sec=0.0 t_ub=0.0 feas=None relax={'Xdata-sensitive:obs0': (7, 'graphlike-bfs', 283, 2, 0.0)}
+D d=7 Z rounds=3: lb=7 ub=7 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=1919 dets=144 sec=0.1 t_ub=0.1 feas=None relax={'Xdata-sensitive:obs0': (7, 'graphlike-bfs', 403, 2, 0.0)}
+D d=7 Z rounds=7: lb=7 ub=7 status=exact lb_by=relax:Xdata-sensitive:graphlike-bfs ub_by=lifted:Xdata-sensitive:obs0 mech=5471 dets=336 sec=0.3 t_ub=0.3 feas=None relax={'Xdata-sensitive:obs0': (7, 'graphlike-bfs', 883, 2, 0.1)}
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase1/solver_benchmark.py E35
+## E. transversal CNOT, perpendicular, rounds d+d, fast route
+E d=3 init=ZZ meas=ZZ: lb=3 ub=3 status=exact lb_by=relax:extra0:graphlike-bfs ub_by=lifted:extra0:obs0 mech=1187 dets=96 sec=0.2 t_ub=0.2 feas=None relax={'extra0:obs0': (3, 'graphlike-bfs', 103, 2, 0.0), 'extra0:obs1': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra1:obs1': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra2:obs1': (1, 'graphlike-bfs', 93, 2, 0.0), 'extra3:obs1': (1, 'graphlike-bfs', 109, 2, 0.0), 'Xdata-sensitive:obs1': (3, 'projected-milp', 213, 4, 0.2)}
+E d=3 init=XX meas=XX: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=1191 dets=96 sec=0.1 t_ub=0.1 feas=None relax={'extra2:obs0': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 108, 2, 0.0), 'extra1:obs0': (1, 'graphlike-bfs', 92, 2, 0.0), 'Zdata-sensitive:obs0': (3, 'projected-milp', 213, 4, 0.1), 'extra2:obs1': (1, 'graphlike-bfs', 108, 2, 0.0), 'extra3:obs1': (3, 'graphlike-bfs', 103, 2, 0.0)}
+E d=3 init=XZ meas=ZZ: lb=3 ub=3 status=exact lb_by=relax:Xdata-sensitive:projected-milp ub_by=lifted:Xdata-sensitive:obs0 mech=1188 dets=96 sec=0.1 t_ub=0.1 feas=None relax={'extra1:obs0': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 90, 2, 0.0), 'extra2:obs0': (1, 'graphlike-bfs', 109, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 109, 2, 0.0), 'Xdata-sensitive:obs0': (3, 'projected-milp', 197, 4, 0.1)}
+E d=3 init=XZ meas=XX: lb=3 ub=3 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=1190 dets=96 sec=0.1 t_ub=0.1 feas=None relax={'extra2:obs0': (1, 'graphlike-bfs', 106, 2, 0.0), 'extra1:obs0': (1, 'graphlike-bfs', 108, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 90, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 108, 2, 0.0), 'Zdata-sensitive:obs0': (3, 'projected-milp', 197, 4, 0.1)}
+E d=5 init=ZZ meas=ZZ: lb=5 ub=5 status=exact lb_by=relax:extra0:graphlike-bfs ub_by=lifted:extra0:obs0 mech=7651 dets=480 sec=4.6 t_ub=4.6 feas=None relax={'extra0:obs0': (5, 'graphlike-bfs', 581, 2, 0.1), 'extra0:obs1': (1, 'graphlike-bfs', 585, 2, 0.0), 'extra1:obs1': (1, 'graphlike-bfs', 591, 2, 0.0), 'extra2:obs1': (1, 'graphlike-bfs', 565, 2, 0.0), 'extra3:obs1': (1, 'graphlike-bfs', 623, 2, 0.0), 'Xdata-sensitive:obs1': (5, 'projected-milp', 1183, 4, 4.1)}
+E d=5 init=XX meas=XX: lb=5 ub=5 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=7655 dets=480 sec=4.8 t_ub=4.8 feas=None relax={'extra2:obs0': (1, 'graphlike-bfs', 591, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 585, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 622, 2, 0.0), 'extra1:obs0': (1, 'graphlike-bfs', 564, 2, 0.0), 'Zdata-sensitive:obs0': (5, 'projected-milp', 1183, 4, 4.3), 'extra2:obs1': (1, 'graphlike-bfs', 591, 2, 0.0), 'extra3:obs1': (5, 'graphlike-bfs', 581, 2, 0.1)}
+E d=5 init=XZ meas=ZZ: lb=5 ub=5 status=exact lb_by=relax:Xdata-sensitive:projected-milp ub_by=lifted:Xdata-sensitive:obs0 mech=7652 dets=480 sec=4.3 t_ub=4.3 feas=None relax={'extra1:obs0': (1, 'graphlike-bfs', 591, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 535, 2, 0.0), 'extra2:obs0': (1, 'graphlike-bfs', 615, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 623, 2, 0.0), 'Xdata-sensitive:obs0': (5, 'projected-milp', 1133, 4, 4.0)}
+E d=5 init=XZ meas=XX: lb=5 ub=5 status=exact lb_by=relax:Zdata-sensitive:projected-milp ub_by=lifted:Zdata-sensitive:obs0 mech=7654 dets=480 sec=4.4 t_ub=4.4 feas=None relax={'extra2:obs0': (1, 'graphlike-bfs', 591, 2, 0.0), 'extra1:obs0': (1, 'graphlike-bfs', 614, 2, 0.0), 'extra3:obs0': (1, 'graphlike-bfs', 535, 2, 0.0), 'extra0:obs0': (1, 'graphlike-bfs', 622, 2, 0.0), 'Zdata-sensitive:obs0': (5, 'projected-milp', 1133, 4, 3.9)}
+EXIT 0
+# transversal CNOT d=7: see cnot_d7_{ZZZZ,XXXX,XZZZ,XZXX}.out (phase1/cnot_d7_bounds.py)
