@@ -34,6 +34,7 @@ import argparse
 import io
 import json
 import os
+import re
 import socket
 import sys
 import textwrap
@@ -231,9 +232,8 @@ def c_fact(cx, a):
 
 def c_assign(cx, a):
     cx.need("main")
-    ws = cx.st.get("workers_this_round")
-    if ws and a.worker not in ws:
-        raise ValueError(f"unknown worker {a.worker}; workers this round: {', '.join(ws)}")
+    if not re.fullmatch(r"w[1-9][0-9]{0,2}", a.worker):
+        raise ValueError("worker names are w1, w2, ... (no limit on how many you assign)")
     cx.st.assign(a.worker, read_text(a))
     print(f"assignment for {a.worker} recorded (round {cx.st.current_round()})")
 

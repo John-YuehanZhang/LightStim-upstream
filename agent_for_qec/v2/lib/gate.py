@@ -57,14 +57,15 @@ sys.path.insert(0, str(HERE))
 from verify_stack import min_weight_vector, min_weight_vector_milp, check_flows, noiseless_sanity, \
     platform_report, _dem_matrices  # noqa: E402
 from circuit_distance_fast import fast_circuit_distance  # noqa: E402
-from circuitops import standard_noise, logical_segment  # noqa: E402
+from circuitops import standard_noise, logical_segment, resource_stats  # noqa: E402
 from codecheck import symplectic_matrix, commute_matrix, gf2_rank, code_distance, check_logical_flows  # noqa: E402
 import sandbox  # noqa: E402
 
 PY = os.environ.get("QEC_PYTHON", "/home/yuehan/miniconda3/envs/light_stim/bin/python")
 RESULTS = Path(os.environ.get("QEC_RESULTS_ROOT", str(V2 / "results")))
 KINDS = {"code", "memory", "logical_gate", "logical_measurement", "resource_gate"}
-CIRCUIT_FIELDS = {"name", "claimed_circuit_distance", "claim_type", "resource_blocks"}
+CIRCUIT_FIELDS = {"name", "claimed_circuit_distance", "claim_type", "resource_blocks", "rounds"}
+ROUND_FIELDS = {"before", "operation", "after"}
 CLAIM_TYPES = {"exact", "at_least"}
 MAX_BUNDLE_BYTES = 20 * 1024 * 1024
 
@@ -291,6 +292,13 @@ def check_circuit(name: str, circuit: stim.Circuit, spec: dict, built: dict, S, 
         out["platform_stats"] = platform_report(circuit).__dict__
     except Exception:
         pass
+    # --- raw resource quantities (recorded, never used for acceptance)
+    try:
+        seg_stats = resource_stats(logical_segment(circuit, data), data) if data else None
+        out["resources"] = {"full_circuit": resource_stats(circuit, data), "logical_segment": seg_stats,
+                            "declared_rounds": spec.get("rounds")}
+    except Exception as ex:
+        out["resources"] = {"error": str(ex)[:200]}
     out["pass"] = not problems
     if problems:
         out["reason"] = "; ".join(problems)
@@ -317,12 +325,12 @@ def build_in_sandbox(sub_dir: Path, work: Path, timeout_s: int = 3600) -> subpro
 
 # ---------------------------------------------------------------- entry point
 def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, code_timeout_s: float = 600.0,
-             noise_p: Optional[float] = None) -> dict:
+             noise_p: Optional[float] = None, run_id: Optional[int] = None) -> dict:
     """Verify a submission directory; on success insert a fact. Returns the report.
     Never raises for problems in the submission: every outcome is recorded."""
     sub_dir = Path(sub_dir).resolve()
     t0 = time.time()
-    report: Dict = {"author": author, "checks": []}
+    report: Dict = {"author": author, "checks": [], "run_id": run_id}
     sub_id = None
     try:
         size = sum(p.stat().st_size for p in sub_dir.rglob("*") if p.is_file())
@@ -342,6 +350,10 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
             extra = set(c) - CIRCUIT_FIELDS
             if extra:
                 raise ValueError(f"unknown circuit fields {sorted(extra)}")
+            rd = c.get("rounds")
+            if rd is not None and (not isinstance(rd, dict) or set(rd) - ROUND_FIELDS
+                                   or any(not isinstance(v, int) or v < 0 for v in rd.values())):
+                raise ValueError("rounds must be {\"before\": int, \"operation\": int, \"after\": int}")
         deps = [store.resolve_fact_id(d) for d in (spec.get("depends_on") or [])]
         report["depends_on"] = deps
         existing = store.fact(sub_id, exact=True)
@@ -410,7 +422,7 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
         claims = {k: spec.get(k) for k in ("code", "circuits", "description", "kind", "title", "layer", "compared_to")}
         try:
             store.add_fact(fact_id, kind, spec.get("title"), claims, report, deps, sub_id, author,
-                           origin=store.get("origin", "agent"))
+                           origin=store.get("origin", "agent"), run_id=run_id)
             dest = RESULTS / store.project / "facts" / fact_id[:12]
             if dest.exists():
                 shutil.rmtree(dest)

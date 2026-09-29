@@ -104,9 +104,15 @@ Code), `openai` (needs the Codex CLI harness; not implemented yet).
 Resource and scheduling rules are operator knowledge, kept in code and
 `config/models.toml`, never in the published prompts:
 
-- `[orchestrator] max_workers`: workers per round = min(max_workers, accounts
-  with quota for the worker model). The names w1..wN are stored as
-  `workers_this_round`; the main agent sees only the names.
+- The number of workers (and of refuters, subagents, tokens, dollars) is never
+  capped: the main agent assigns as many workers as it wants (w1, w2, ...).
+  Only parallelism is bounded, by accounts with quota and `cpu_slots`; extra
+  processes run in later waves. Cost is recorded per process (USD, tokens,
+  time) and reported in RUN_INFO.md and the ledger, never enforced.
+- Every accepted fact records its raw resource quantities (qubits, ancilla,
+  TICK moments, spacetime volume, gate counts, declared rounds) and the id of
+  the process that produced it; logical error rates are added later by
+  `runner/evaluate_ler.py`. No score is computed by the system.
 - Quota: `lib/quota.py` reads each account's 5-hour and 7-day windows (Haiku
   probe); models with their own limit are probed separately. A process cut off
   by a limit blocks that (account, model) until the reported reset time and is

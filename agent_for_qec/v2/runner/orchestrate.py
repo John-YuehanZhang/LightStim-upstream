@@ -4,16 +4,15 @@
   orchestrate.py --project P --rounds 3 [--wait-hours 2] [--max-wait-hours 72]
 
 One round:
-  0. the number of workers is fixed: min([orchestrator].max_workers, accounts
-     with quota for the worker model); names w1..wN are stored as
-     `workers_this_round` (the main agent sees only the names)
-     and written, with the other run conditions, as the round's
+  0. the run conditions (no limit on the number of workers; compute per
+     process; no internet while solving) are written as the round's
      `operating_rules` memory (agents read it through `qec.py status`)
   1. main agent: reads the store, writes route registry, guidance and one
      assignment per worker, opens challenges on facts (how many refuters, what
      to attack), or declares the task done
-  2. workers and refuters, in waves of as many processes as there are free
-     accounts with quota (parallelism changes speed, not results). A process
+  2. workers and refuters, as many as the main agent assigned, in waves of as
+     many processes as there are free accounts with quota (parallelism changes
+     speed, not results; the number of assignments is never capped). A process
      cut off by a usage limit keeps its assignment open and is relaunched on
      another account; one that fails otherwise is relaunched up to max_relaunch
   3. ledger rendered.
@@ -145,7 +144,9 @@ class Orchestrator:
             lines.append("- This is the closing pass of the run: no worker assignments will be executed. Only open "
                          "challenges on facts that should be attacked; do not write assignments.")
         else:
-            lines.append(f"- Workers available this round: {', '.join(workers)}. Give each exactly one assignment.")
+            lines.append("- Assign as many workers as the work needs (names w1, w2, ...); there is no limit on their "
+                         "number. Each gets exactly one assignment. They run in parallel as far as accounts allow, "
+                         "otherwise in waves.")
         lines += [f"- Each process has {per} CPU cores; do not run more than {per} parallel jobs.",
                   "- A single tool call is limited to about 10 minutes. Run longer jobs in the background, have them "
                   "write a .done file, and wait for it before ending your turn.",
@@ -162,14 +163,8 @@ class Orchestrator:
             log(f"main agent failed (exit {r.get('exit')}), attempt {i + 1}")
         return False
 
-    def plan_workers(self, st: Store) -> list:
-        cap = self.wait_for("worker")
-        n = max(1, min(int(self.ocfg.get("max_workers", 6)), cap))
-        ws = [f"w{i + 1}" for i in range(n)]
-        st.set("workers_this_round", ws)
-        self.round_rules(st, ws)
-        log(f"workers this round: {ws} (accounts usable for workers: {cap})")
-        return ws
+    def open_workers(self, st: Store) -> list:
+        return [x["worker"] for x in st.open_assignments() if not x["worker"].startswith("rf")]
 
     def closing(self):
         st = Store(self.a.project)
@@ -179,7 +174,6 @@ class Orchestrator:
         st = Store(self.a.project)
         if [f for f in st.facts() if f["refute_status"] == "unchallenged"]:
             st.set("round", st.current_round() + 1)
-            st.set("workers_this_round", [])
             self.round_rules(st, [], closing=True)
             log(f"=== closing pass (round {st.current_round()}) ===")
             self.main_phase()
@@ -201,21 +195,21 @@ class Orchestrator:
         st = Store(a.project)
         try:
             for i in range(a.rounds):
-                if i == 0 and a.skip_main_first:
-                    workers = st.get("workers_this_round") or []
-                else:
+                if not (i == 0 and a.skip_main_first):
                     rnd = st.current_round() + 1
                     st.set("round", rnd)
                     log(f"=== round {rnd} ===")
-                    workers = self.plan_workers(st)
+                    self.round_rules(st, [])
                     if not self.main_phase():
                         log("main agent failed repeatedly; stopping")
                         break
                 st = Store(a.project)
+                workers = self.open_workers(st)
+                log(f"workers assigned this round: {workers}")
                 if st.get("status") == "done":
                     log("main agent declared the task done")
                     break
-                if not [w for w in workers if st.assignment(w) is not None] and not st.open_challenges():
+                if not workers and not st.open_challenges():
                     log("no open assignments or challenges after the main agent; stopping")
                     break
                 refuters = self.open_refuters(st)

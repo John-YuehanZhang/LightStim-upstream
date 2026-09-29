@@ -70,6 +70,13 @@ def write_run_info(st) -> Path:
     for r in runs:
         L.append(f"- {r['role']} / {r['model']} / `{str(r['prompt_sha'])[:12]}` × {r['n']}, "
                  f"${(r['c'] or 0):.2f}, {_t(r['s'])} – {_t(r['e'])}")
+    cs = st.cost_summary()
+    L += ["", "## Cost (reported only; nothing was constrained by it)", "",
+          f"- processes: {cs['processes']}; USD {cs['usd']:.2f}; output tokens {cs['output_tokens']:,}; "
+          f"input tokens incl. cache {cs['input_tokens'] + cs['cache_read_tokens'] + cs['cache_creation_tokens']:,}; "
+          f"process-hours {cs['process_seconds'] / 3600:.1f}",
+          *[f"- {k}: {v['processes']} processes, {v['distinct_names']} distinct names, ${v['usd']:.2f}"
+            for k, v in cs["per_role"].items()]]
     L += ["", "## Results", "",
           f"- facts: {len(facts)} ({', '.join(f'{k} {v}' for k, v in sorted(by.items())) or 'none'})",
           f"- submissions: {', '.join(f'{k} {v}' for k, v in sorted(subs.items())) or 'none'}",

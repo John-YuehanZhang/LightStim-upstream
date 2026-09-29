@@ -71,14 +71,15 @@ class Service:
         self.servers: Dict[str, _Server] = {}
         self.jobs: Dict[str, dict] = {}
 
-    def endpoint(self, role: str, worker: str, roots: List[str]) -> str:
+    def endpoint(self, role: str, worker: str, roots: List[str], run_id=None) -> str:
         """Create a socket for one agent process; returns the directory containing `sock`."""
         eid = f"{role}_{worker}_{uuid.uuid4().hex[:8]}"
         d = self.sock_root / eid
         d.mkdir(parents=True)
         path = d / "sock"
         srv = _Server(str(path), _Handler)
-        srv.endpoint = {"role": role, "worker": worker, "roots": [str(Path(r).resolve()) for r in roots]}
+        srv.endpoint = {"role": role, "worker": worker, "roots": [str(Path(r).resolve()) for r in roots],
+                        "run_id": run_id}
         srv.service = self
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.servers[eid] = srv
@@ -109,7 +110,8 @@ class Service:
 
         def job():
             try:
-                box["rep"] = run_gate(sub, Store(self.project), ep["worker"], milp_time_s=a.milp_time)
+                box["rep"] = run_gate(sub, Store(self.project), ep["worker"], milp_time_s=a.milp_time,
+                                      run_id=ep.get("run_id"))
             except Exception as ex:  # run_gate records its own failures; this is a last resort
                 box["rep"] = {"outcome": "error", "reason": f"gate crashed: {type(ex).__name__}: {ex}"}
             done.set()

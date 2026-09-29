@@ -154,12 +154,12 @@ from render import _cell  # noqa: E402
 check("ledger cells escape pipes and newlines", _cell("a|b\nc") == "a\\|b c", _cell("a|b\nc"))
 # ---- v2.2: operating rules
 st = Store("t")
-st.set_operating_rules("all", "- Workers available this round: w1, w2.")
+st.set_operating_rules("all", "- Assign as many workers as the work needs.")
 st.set_operating_rules("w1", "- You may run at most 2 subagent(s) at a time.")
 st.set_operating_rules("w2", "- You may run at most 0 subagent(s) at a time.")
 out, code = run(["status"], role="worker", worker="w1")
 check("status shows round rules and this process's rules only",
-      "Workers available this round: w1, w2" in out and "at most 2 subagent" in out and "at most 0" not in out, "")
+      "as many workers as the work needs" in out and "at most 2 subagent" in out and "at most 0" not in out, "")
 out, code = run(["memory", "add", "--kind", "operating_rules", "--claim", "x"], role="main", worker="main")
 check("agents cannot write operating rules", code == 13, out.strip()[:80])
 # ---- v2.2: challenges, refutations, human adjudication
@@ -226,9 +226,18 @@ names = o.open_refuters(st)
 check("each challenge becomes n refuter assignments", [n for n in names if n.startswith(f"rf{cid}_")] ==
       [f"rf{cid}_1", f"rf{cid}_2"] and f"challenge #{cid}" in Store("t").assignment(f"rf{cid}_1")["text"], str(names))
 check("refuter assignments are not duplicated", o.open_refuters(Store("t")) == names, "")
-o.round_rules(st, ["w1", "w2", "w3"])
+o.round_rules(st, [])
 rules = "\n".join(r["claim"] for r in Store("t").operating_rules_for("w1"))
-check("round rules list workers and the no-internet rule", "w1, w2, w3" in rules and "internet" in rules, rules[:120])
+check("round rules: unlimited workers and the no-internet rule", "no limit on their number" in rules and "internet" in rules, rules[:120])
+out, code = run(["assign", "w42", "--text", "x"], role="main", worker="main")
+check("main may assign any number of workers (w42 accepted)", code == 0, out.strip()[:80])
+out, code = run(["assign", "bob", "--text", "x"], role="main", worker="main")
+check("worker names must be w<n>", code != 0, out.strip()[:80])
+check("open_workers lists assigned workers", "w42" in o.open_workers(Store("t")), "")
+rs = [c.get("resources") for fx in Store("t").facts(None) for c in json.loads(fx["verdict"])["checks"]
+      if c.get("check") == "P2-P4_circuit"]
+check("facts record raw resource quantities", rs and all(r and "full_circuit" in r and
+      r["full_circuit"]["spacetime_volume_qubit_moments"] > 0 for r in rs), str(rs)[:200])
 o.round_rules(st, [], closing=True)
 check("closing-pass rules say no assignments run", "closing pass" in Store("t").operating_rules_for("x")[0]["claim"], "")
 o.service.shutdown()

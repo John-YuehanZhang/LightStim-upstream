@@ -32,14 +32,28 @@ def _row(st, r) -> str:
     plat = "; ".join(f"{c['name']}: nonlocal2q={c['platform_stats']['n_nonlocal_2q']}"
                      for c in circ if c.get("platform_stats"))
     deps = ", ".join(d[:8] for d in json.loads(r["depends_on"] or "[]"))
+    def rq(c):
+        x = (c.get("resources") or {}).get("logical_segment") or (c.get("resources") or {}).get("full_circuit") or {}
+        rd = (c.get("resources") or {}).get("declared_rounds") or {}
+        return (f"{c['name']}: Q={x.get('qubits_used', '?')} (anc {x.get('ancilla_qubits', '?')}) "
+                f"T={x.get('tick_moments', '?')} V={x.get('spacetime_volume_qubit_moments', '?')} "
+                f"2q={x.get('gates_2q', '?')}" + (f" rounds={rd}" if rd else ""))
+    resq = "; ".join(rq(c) for c in circ if c.get("resources"))
+    ev = json.loads(r["evaluation"]) if r["evaluation"] else None
+    ler = "; ".join(f"{k}={v.get('ler'):.2e}±{v.get('ler_err', 0):.1e}" for k, v in (ev or {}).get("circuits", {}).items()
+                    if isinstance(v, dict) and v.get("ler") is not None) or "-"
+    run = st.run(r["run_id"])
+    cost = (f"${run['cost_usd'] or 0:.2f}, {run['model']}, out {run['output_tokens'] or '?'} tok" if run else "-")
     return (f"| `{r['id'][:12]}` | {_cell(claims.get('layer'))} | {r['origin']} | {r['kind']} | {_cell(r['title'])} | "
-            f"{code} | {dists or '-'} | {_cell(res or '-')} | {plat or '-'} | {r['refute_status']} | "
-            f"{r['novelty_status']} | {deps or '-'} |")
+            f"{code} | {dists or '-'} | {_cell(resq or '-', 400)} | {ler} | {_cell(res or '-')} | {plat or '-'} | "
+            f"{r['refute_status']} | {r['novelty_status']} | {cost} | {deps or '-'} |")
 
 
 HEAD = ("| fact | layer | origin | kind | title | code | exact circuit distance per circuit (FT = equals d) | "
-        "assumed resources | platform stats | refutation | novelty | depends on |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|")
+        "resources of the logical segment (qubits, ancilla, TICK moments, volume, 2q gates, declared rounds) | "
+        "logical error rate (final evaluation) | assumed resources | platform stats | refutation | novelty | "
+        "process cost | depends on |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
 
 def render_ledger(st) -> Path:
@@ -53,7 +67,14 @@ def render_ledger(st) -> Path:
          "code, P4 exact circuit-level distance under the gate's standard noise. Non-programmatic judgements "
          "(recorded, never decide acceptance): refuters try to break each challenged fact; a refutation is decided "
          "by the human; novelty = literature search, 'new' only after human sign-off. Distances are verified at the "
-         "listed instances only.", ""]
+         "listed instances only. Resource quantities, logical error rates and costs are recorded raw; no score is "
+         "computed here.", ""]
+    cs = st.cost_summary()
+    L += [f"Cost of this run (reported, never a constraint): {cs['processes']} processes, ${cs['usd']:.2f}, "
+          f"{cs['output_tokens']:,} output tokens, {cs['input_tokens'] + cs['cache_read_tokens'] + cs['cache_creation_tokens']:,} "
+          f"input tokens incl. cache, {cs['process_seconds'] / 3600:.1f} process-hours; per role: "
+          + ", ".join(f"{k}: {v['processes']} processes / {v['distinct_names']} names / ${v['usd']:.2f}"
+                      for k, v in cs['per_role'].items()), ""]
     facts = st.facts(None)
     groups = [
         ("Accepted facts", lambda r: r["status"] == "active" and r["refute_status"] not in

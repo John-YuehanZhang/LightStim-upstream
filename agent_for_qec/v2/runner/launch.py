@@ -255,14 +255,14 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     if own_service:
         from service import Service
         service = Service(project, RUNTIME_ROOT)
-    sock_dir = service.endpoint(role, worker, [str(wdir)])
-    st.set_operating_rules(worker, process_rules(subagent_limit(lease.headroom, cfg.get("orchestrator", {}))))
     logdir = st.dir / "logs"
     logdir.mkdir(exist_ok=True)
     log = logdir / f"{ts}_r{st.current_round()}_{role}_{worker}_{lease.account}.jsonl"
     run_id = st.add_run(round=st.current_round(), role=role, worker=worker, account=lease.account,
                         provider=lease.provider, model=rcfg["model"], prompt_sha=psha, repo_head=head,
                         log=str(log), started=time.time())
+    sock_dir = service.endpoint(role, worker, [str(wdir)], run_id=run_id)
+    st.set_operating_rules(worker, process_rules(subagent_limit(lease.headroom, cfg.get("orchestrator", {}))))
     cmd = ["taskset", "-c", slot.cpus] + sandbox_cmd(inner, project=project, wdir=wdir, home=home,
                                                       sock_dir=sock_dir)
     proxy = RecordingProxy(log.with_suffix(".net.log"), f"{role}/{worker}")
@@ -286,8 +286,11 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     parsed = parse_log(log)
     res, rej = parsed["result"], parsed["rejected"]
     cost = res.get("total_cost_usd") or 0
+    u = res.get("usage") or {}
     st.finish_run(run_id, ended=time.time(), exit=rc, cost_usd=cost, turns=res.get("num_turns"),
-                  result_head=str(res.get("result", ""))[:300])
+                  result_head=str(res.get("result", ""))[:300], input_tokens=u.get("input_tokens"),
+                  output_tokens=u.get("output_tokens"), cache_read_tokens=u.get("cache_read_input_tokens"),
+                  cache_creation_tokens=u.get("cache_creation_input_tokens"))
     with open(RUNTIME_ROOT / "usage_log.jsonl", "a") as f:
         f.write(json.dumps({"ts": time.time(), "account": lease.account, "model": rcfg["model"], "role": role,
                             "project": project, "cost_usd": cost, "exit": rc}) + "\n")

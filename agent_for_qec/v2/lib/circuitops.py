@@ -51,6 +51,61 @@ def all_qubits(c: stim.Circuit) -> Set[int]:
     return qs
 
 
+TWO_Q = {"CX", "CZ", "CY", "SWAP", "ISWAP", "ISWAP_DAG", "XCX", "XCZ", "YCX", "YCZ", "ZCX", "ZCZ", "SQRT_XX",
+         "SQRT_YY", "SQRT_ZZ", "SQRT_XX_DAG", "SQRT_YY_DAG", "SQRT_ZZ_DAG", "CXSWAP", "SWAPCX", "CZSWAP"}
+MEAS = {"M", "MX", "MY", "MZ", "MR", "MRX", "MRY", "MRZ", "MPP", "MXX", "MYY", "MZZ", "MPAD"}
+RESETS = {"R", "RX", "RY", "RZ"}
+
+
+def resource_stats(circuit: stim.Circuit, data_qubits: Iterable[int]) -> dict:
+    """Raw resource quantities of a circuit (recorded for every accepted fact; no
+    scoring here): qubits touched, ancilla count, TICK moments, gate counts,
+    measurement moments, spacetime volume = qubits x moments."""
+    data = set(int(q) for q in data_qubits)
+    used, moments, meas_moments = set(), 0, 0
+    n1 = n2 = nm = nr = nmpp = 0
+    max_mpp = 0
+    in_moment_meas = False
+    seen_any = False
+    for inst in circuit.without_noise().flattened():
+        if inst.name == "TICK":
+            if seen_any:
+                moments += 1
+                meas_moments += in_moment_meas
+            in_moment_meas = False
+            seen_any = False
+            continue
+        if inst.name in ANNOT:
+            continue
+        seen_any = True
+        ts = _targets(inst)
+        used.update(ts)
+        if inst.name in TWO_Q:
+            n2 += len(ts) // 2
+        elif inst.name in MEAS:
+            nm += 1 if inst.name != "MPP" else 0
+            in_moment_meas = True
+            if inst.name == "MPP":
+                for g in str(inst).split()[1:]:
+                    w = g.count("*") + 1
+                    nmpp += 1
+                    max_mpp = max(max_mpp, w)
+            elif inst.name in ("MXX", "MYY", "MZZ"):
+                nmpp += len(ts) // 2
+                max_mpp = max(max_mpp, 2)
+        elif inst.name in RESETS:
+            nr += len(ts)
+        else:
+            n1 += len(ts)
+    if seen_any:
+        moments += 1
+        meas_moments += in_moment_meas
+    return {"qubits_used": len(used), "data_qubits": len(used & data), "ancilla_qubits": len(used - data),
+            "tick_moments": moments, "measurement_moments": meas_moments, "gates_1q": n1, "gates_2q": n2,
+            "measurements_1q": nm, "measurements_multi": nmpp, "max_pauli_product_weight": max_mpp, "resets": nr,
+            "spacetime_volume_qubit_moments": len(used) * moments}
+
+
 def standard_noise(circuit: stim.Circuit, p: float) -> stim.Circuit:
     clean = circuit.without_noise().flattened()
     qubits = sorted(all_qubits(clean) | set(clean.get_final_qubit_coordinates()))

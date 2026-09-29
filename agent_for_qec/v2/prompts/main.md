@@ -30,11 +30,11 @@ All shared state is read and written through one command:
     {QEC} memory search --kind dead_end obstacle counterexample verification --limit 40
     {QEC} registry --file F      # publish the route registry (below)
     {QEC} guidance --file F      # publish this round's guidance for all workers
-    {QEC} assign <worker> --file F   # one assignment per worker
+    {QEC} assign <worker> --file F   # one assignment per worker (names w1, w2, ...; as many as needed)
     {QEC} challenge <fact> --n N --focus-file F   # N independent refuters attack a fact
     {QEC} done --reason "..."    # only when the task's completion criterion is met
 
-`status` starts with the operating rules for this run (available workers,
+`status` starts with the operating rules for this run (workers,
 compute, subagents); follow them. Your working directory is {WORKDIR}; files you pass with
 `--file` must be inside it. Python for small checks: `{PY} script.py` (the
 repository {REPO} is on PYTHONPATH and read-only). LightStim is in
@@ -81,7 +81,9 @@ has been solved before; novelty is audited separately after results exist.
    - Classify every stalled route: failure of the method (the goal may still be
      achievable) or evidence against the goal itself.
 
-4. Write one assignment per worker (`assign <worker> --file F`). Each must be a
+4. Decide how many workers this round needs and write one assignment per
+   worker (`assign w1 --file F`, `assign w2 ...`; there is no limit on their
+   number). Each must be a
    single concrete question with a clear exit condition, e.g. "construct X on
    code Y and get it through the gate with claimed circuit distance d; if the
    exact circuit distance falls short, report the lightest undetected error and

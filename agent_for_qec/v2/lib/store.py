@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS facts (
   novelty_status TEXT DEFAULT 'pending', -- pending | prior_found | no_prior_found | human_confirmed_new
   novelty TEXT,
   origin TEXT DEFAULT 'agent',           -- agent | calibration | human
-  refute_status TEXT DEFAULT 'unchallenged'
+  refute_status TEXT DEFAULT 'unchallenged',
+  run_id INTEGER,                        -- the process that submitted it (cost, model, account)
+  evaluation TEXT                        -- JSON: final evaluation (logical error rates), filled after the run
 );
 CREATE TABLE IF NOT EXISTS challenges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +91,8 @@ CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   round INTEGER, role TEXT, worker TEXT, account TEXT, provider TEXT, model TEXT,
   prompt_sha TEXT, repo_head TEXT, log TEXT, started REAL, ended REAL,
-  exit INTEGER, cost_usd REAL, turns INTEGER, result_head TEXT
+  exit INTEGER, cost_usd REAL, turns INTEGER, result_head TEXT,
+  input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_creation_tokens INTEGER
 );
 """
 
@@ -133,10 +136,17 @@ class Store:
         self.con.execute("PRAGMA journal_mode=WAL")
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
-        cols = {r[1] for r in self.con.execute("PRAGMA table_info(facts)")}
-        if "refute_status" not in cols:     # stores created before v2.2
-            self.con.execute("ALTER TABLE facts ADD COLUMN refute_status TEXT DEFAULT 'unchallenged'")
+        self._migrate("facts", {"refute_status": "TEXT DEFAULT 'unchallenged'", "run_id": "INTEGER",
+                                "evaluation": "TEXT"})
+        self._migrate("runs", {"input_tokens": "INTEGER", "output_tokens": "INTEGER", "cache_read_tokens": "INTEGER",
+                               "cache_creation_tokens": "INTEGER"})
         self.con.commit()
+
+    def _migrate(self, table: str, columns: Dict[str, str]) -> None:
+        have = {r[1] for r in self.con.execute(f"PRAGMA table_info({table})")}
+        for c, t in columns.items():
+            if c not in have:
+                self.con.execute(f"ALTER TABLE {table} ADD COLUMN {c} {t}")
 
     # ------------------------------------------------------------ project kv
     def get(self, key: str, default: Any = None) -> Any:
@@ -184,7 +194,8 @@ class Store:
 
     # ------------------------------------------------------------ facts
     def add_fact(self, fact_id: str, kind: str, title: str, claims: dict, verdict: dict,
-                 depends_on: List[str], submission_id: str, author: str, origin: str = "agent") -> None:
+                 depends_on: List[str], submission_id: str, author: str, origin: str = "agent",
+                 run_id: Optional[int] = None) -> None:
         """Insert a new fact. Never overwrites: an existing id (active or revoked) is an error."""
         for dep in depends_on:
             r = self.fact(dep, exact=True)
@@ -192,10 +203,32 @@ class Store:
                 raise ValueError(f"dependency {dep} is missing or revoked")
         with self.con:
             self.con.execute(
-                "INSERT INTO facts(id,kind,title,claims,verdict,depends_on,submission_id,author,created,origin)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO facts(id,kind,title,claims,verdict,depends_on,submission_id,author,created,origin,run_id)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (fact_id, kind, title, jdump(claims), jdump(verdict), jdump(depends_on),
-                 submission_id, author, time.time(), origin))
+                 submission_id, author, time.time(), origin, run_id))
+
+    def set_evaluation(self, fact_id: str, evaluation: dict) -> None:
+        fid = self.resolve_fact_id(fact_id)
+        self.con.execute("UPDATE facts SET evaluation=? WHERE id=?", (jdump(evaluation), fid))
+        self.con.commit()
+
+    def run(self, run_id) -> Optional[sqlite3.Row]:
+        if run_id is None:
+            return None
+        return self.con.execute("SELECT * FROM runs WHERE id=?", (int(run_id),)).fetchone()
+
+    def cost_summary(self) -> dict:
+        r = self.con.execute("SELECT COUNT(*) n, SUM(cost_usd) usd, SUM(input_tokens) i, SUM(output_tokens) o, "
+                             "SUM(cache_read_tokens) cr, SUM(cache_creation_tokens) cc, "
+                             "SUM(COALESCE(ended, started) - started) secs FROM runs").fetchone()
+        per_role = self.con.execute("SELECT role, COUNT(*) n, SUM(cost_usd) usd, COUNT(DISTINCT worker) names "
+                                    "FROM runs GROUP BY role").fetchall()
+        return {"processes": r["n"], "usd": r["usd"] or 0, "input_tokens": r["i"] or 0, "output_tokens": r["o"] or 0,
+                "cache_read_tokens": r["cr"] or 0, "cache_creation_tokens": r["cc"] or 0,
+                "process_seconds": r["secs"] or 0,
+                "per_role": {x["role"]: {"processes": x["n"], "usd": x["usd"] or 0, "distinct_names": x["names"]}
+                             for x in per_role}}
 
     def fact(self, fact_id: str, exact: bool = False) -> Optional[sqlite3.Row]:
         """Look up a fact by full id, or by an unambiguous prefix of at least 8 hex characters."""
