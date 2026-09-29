@@ -1,0 +1,50 @@
+generic d=5 X-checks (weight 4): hook orientation counts {'vertical': 3, 'horizontal': 2, 'diagonal': 3}; checks with hook parallel to the logical they threaten: [(4, 2), (6, 4), (6, 8)]
+generic d=5 Z-checks (weight 4): hook orientation counts {'vertical': 3, 'horizontal': 2, 'diagonal': 3}; checks with hook parallel to the logical they threaten: [(2, 2), (8, 4)]
+generic d=7 X-checks (weight 4): hook orientation counts {'vertical': 3, 'horizontal': 11, 'diagonal': 4}; checks with hook parallel to the logical they threaten: [(2, 4), (2, 12), (12, 10)]
+generic d=7 Z-checks (weight 4): hook orientation counts {'vertical': 10, 'horizontal': 5, 'diagonal': 3}; checks with hook parallel to the logical they threaten: [(4, 4), (6, 2), (6, 10), (8, 8), (10, 6)]
+
+## CNOT order per check (deltas are (dx,dy) from ancilla; names follow SE_block.py comments)
+perpendicular  X-check order ['NE', 'NW', 'SE', 'SW'] -> X-hook on ['SE', 'SW'] = horizontal (same y) ; Z-check order ['NE', 'SE', 'NW', 'SW'] -> Z-hook on ['NW', 'SW'] = vertical (same x)
+parallel       X-check order ['NE', 'NW', 'SE', 'SW'] -> X-hook on ['SE', 'SW'] = horizontal (same y) ; Z-check order ['NE', 'NW', 'SE', 'SW'] -> Z-hook on ['SE', 'SW'] = horizontal (same y)
+swapped        X-check order ['NE', 'SE', 'NW', 'SW'] -> X-hook on ['NW', 'SW'] = vertical (same x) ; Z-check order ['NE', 'NW', 'SE', 'SW'] -> Z-hook on ['SE', 'SW'] = horizontal (same y)
+Logical ops (code_patch.py): Z_L = Z on row y=1 (horizontal), X_L = X on column x=1 (vertical).
+Z-basis memory is broken by X_L-like errors (vertical X chains) -> dangerous hook: vertical X pair (X checks).
+X-basis memory is broken by Z_L-like errors (horizontal Z chains) -> dangerous hook: horizontal Z pair (Z checks).
+
+=== d=3 basis=Z block=swapped: MILP status=exact weight=2
+  tick=  19 DEPOLARIZE2    on [(2, 4), (3, 3)]  pauli: X(2, 4)  dets=[20]
+  tick=  20 DEPOLARIZE2    on [(3, 1), (2, 2)]  pauli: X(3, 1)  dets=[20]
+
+=== d=3 basis=X block=swapped: MILP status=exact weight=2
+  tick=  19 DEPOLARIZE2    on [(3, 5), (4, 4)]  pauli: Z(4, 4)  dets=[22]
+  tick=  20 DEPOLARIZE2    on [(2, 4), (1, 5)]  pauli: Z(1, 5)  dets=[22]
+
+=== d=3 basis=X block=parallel: MILP status=exact weight=2
+  tick=  19 DEPOLARIZE2    on [(3, 5), (4, 4)]  pauli: Z(4, 4)  dets=[22]
+  tick=  19 DEPOLARIZE2    on [(2, 4), (1, 5)]  pauli: Z(1, 5)  dets=[22]
+
+=== d=5 basis=Z block=swapped: MILP status=exact weight=3
+  tick=  28 DEPOLARIZE2    on [(3, 5), (2, 6)]  pauli: X(3, 5)  dets=[92, 96]
+  tick=  35 DEPOLARIZE2    on [(4, 2), (5, 1)]  pauli: X(4, 2)  dets=[92]
+  tick=  27 DEPOLARIZE2    on [(2, 8), (3, 7)]  pauli: X(2, 8)  dets=[96]
+
+=== d=5 basis=X block=swapped: MILP status=exact weight=3
+  tick=  27 DEPOLARIZE2    on [(7, 9), (8, 8)]  pauli: Z(8, 8)  dets=[105]
+  tick=  35 DEPOLARIZE2    on [(3, 9), (4, 8)]  pauli: Z(4, 8)  dets=[105, 116]
+  tick=  36 DEPOLARIZE2    on [(2, 8), (1, 9)]  pauli: Z(1, 9)  dets=[116]
+
+=== d=5 basis=X block=parallel: MILP status=exact weight=3
+  tick=  27 DEPOLARIZE2    on [(7, 9), (8, 8)]  pauli: Z(8, 8)  dets=[105]
+  tick=  35 DEPOLARIZE2    on [(3, 9), (4, 8)]  pauli: Z(4, 8)  dets=[105, 116]
+  tick=  35 DEPOLARIZE2    on [(2, 8), (1, 9)]  pauli: Z(1, 9)  dets=[116]
+
+=== d=5 basis=Z block=generic_coloration: MILP status=exact weight=3
+  tick=  19 DEPOLARIZE2    on [(5, 5), (6, 6)]  pauli: X(5, 5)  dets=[44, 49]
+  tick=  27 DEPOLARIZE2    on [(4, 2), (5, 3)]  pauli: X(4, 2)  dets=[44]
+  tick=  27 DEPOLARIZE2    on [(6, 8), (5, 9)]  pauli: X(6, 8)  dets=[49]
+
+=== d=5 basis=X block=generic_coloration: MILP status=exact weight=3
+  tick=  14 DEPOLARIZE2    on [(6, 4), (5, 3)]  pauli: Z(5, 3)  dets=[17, 47]
+  tick=   7 DEPOLARIZE2    on [(3, 1), (2, 2)]  pauli: Z(2, 2)  dets=[17]
+  tick=  19 DEPOLARIZE2    on [(9, 3), (8, 4)]  pauli: Z(8, 4)  dets=[47]
+

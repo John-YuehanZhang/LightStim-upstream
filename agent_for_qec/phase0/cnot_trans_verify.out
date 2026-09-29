@@ -1,0 +1,38 @@
+# PYTHONPATH=. python agent_for_qec/phase0/cnot_trans_verify.py 3   (all four combos)
+### d=3: patch code distance n=9 k=1 d=3 (exact)
+  flow X_c -> X_c X_t                 signed=True unsigned=True
+  flow Z_t -> Z_c Z_t                 signed=True unsigned=True
+  flow X_t -> X_t                     signed=True unsigned=True
+  flow Z_c -> Z_c                     signed=True unsigned=True
+  flow NEG X_c -> X_c                 signed=False unsigned=False
+  flow NEG Z_t -> Z_t                 signed=False unsigned=False
+  flow NEG X_c -> -X_c X_t (sign)     signed=False unsigned=True
+  flows: positive all hold=True; negative controls all rejected=True
+  platform: qubits=34 2q=297 nonlocal=9 max_range=8.0 max_partners=5 2q_layers=25 verdict={'superconducting_2D': '9 non-local 2q gates: needs SWAP routing or long-range couplers', 'neutral_atom': '9 non-local 2q gates realised by atom moves (max range 8.0)', 'trapped_ion': 'fits all-to-all within one trap'}
+  init=ZZ meas=ZZ rounds=3+3: obs=2 sanity=True(dets=0,obs=0) search=3 exact=3 lb=2 status=exact mech=1187 dets=96 maxdeg=8 sec=1
+  init=XX meas=XX rounds=3+3: obs=2 sanity=True(dets=0,obs=0) search=3 exact=3 lb=2 status=exact mech=1191 dets=96 maxdeg=8 sec=1
+  init=XZ meas=ZZ rounds=3+3: obs=1 sanity=True(dets=0,obs=0) search=3 exact=3 lb=2 status=exact mech=1188 dets=96 maxdeg=8 sec=0
+  init=XZ meas=XX rounds=3+3: obs=1 sanity=True(dets=0,obs=0) search=3 exact=3 lb=2 status=exact mech=1190 dets=96 maxdeg=8 sec=1
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase0/cnot_trans_verify.py 5 --combos ZZZZ
+### d=5: patch code distance n=25 k=1 d=5 (exact)
+  flow X_c -> X_c X_t                 signed=True unsigned=True
+  flow Z_t -> Z_c Z_t                 signed=True unsigned=True
+  flow X_t -> X_t                     signed=True unsigned=True
+  flow Z_c -> Z_c                     signed=True unsigned=True
+  flow NEG X_c -> X_c                 signed=False unsigned=False
+  flow NEG Z_t -> Z_t                 signed=False unsigned=False
+  flow NEG X_c -> -X_c X_t (sign)     signed=False unsigned=True
+  flows: positive all hold=True; negative controls all rejected=True
+  platform: qubits=98 2q=1625 nonlocal=25 max_range=12.0 max_partners=5 2q_layers=41 verdict={'superconducting_2D': '25 non-local 2q gates: needs SWAP routing or long-range couplers', 'neutral_atom': '25 non-local 2q gates realised by atom moves (max range 12.0)', 'trapped_ion': '98 qubits: needs multi-zone shuttling'}
+  init=ZZ meas=ZZ rounds=5+5: obs=2 sanity=True(dets=0,obs=0) search=5 exact=5 lb=4 status=exact mech=7651 dets=480 maxdeg=8 sec=1270
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase0/cnot_trans_verify.py 5 --combos XXXX
+  init=XX meas=XX rounds=5+5: obs=2 sanity=True(dets=0,obs=0) search=5 exact=5 lb=4 status=exact mech=7655 dets=480 maxdeg=8 sec=1250
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase0/cnot_trans_verify.py 5 --combos XZZZ
+  init=XZ meas=ZZ rounds=5+5: obs=1 sanity=True(dets=0,obs=0) search=5 exact=5 lb=4 status=exact mech=7652 dets=480 maxdeg=8 sec=645
+EXIT 0
+# PYTHONPATH=. timeout 3600 python agent_for_qec/phase0/cnot_trans_verify.py 5 --combos XZXX
+  init=XZ meas=XX rounds=5+5: obs=1 sanity=True(dets=0,obs=0) search=5 exact=5 lb=4 status=exact mech=7654 dets=480 maxdeg=8 sec=510
+EXIT 0
