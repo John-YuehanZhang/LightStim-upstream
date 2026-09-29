@@ -1,0 +1,52 @@
+# Which provider and model each role uses. Edit this file to change the
+# assignment; nothing else in the pipeline hard-codes a model.
+#
+# provider: claude_oauth | anthropic_api | deepseek | openai (openai not yet implemented:
+#           it needs the Codex CLI as its harness instead of Claude Code)
+# model:    passed to the harness's --model flag
+# max_turns / wall_hours: per-process limits (keep wall_hours < 5 for subscription windows)
+
+[roles.main]
+provider = "claude_oauth"
+model = "opus"
+max_turns = 80
+wall_hours = 1.0
+
+[roles.worker]
+provider = "claude_oauth"
+model = "opus"
+max_turns = 250
+wall_hours = 4.5
+
+[roles.reviewer]
+provider = "claude_oauth"
+model = "opus"
+max_turns = 80
+wall_hours = 1.0
+
+[roles.novelty]
+provider = "claude_oauth"
+model = "opus"
+max_turns = 80
+wall_hours = 1.0
+
+[providers.claude_oauth]
+harness = "claude"
+tokens_file = "/nvme2n1/yuehan_zhang/.secrets/claude_oauth_tokens.txt"
+# accounts that still have Fable quota are kept for Fable roles
+reserve_for_fable = ["acct2", "acct7"]
+probe_cache_minutes = 30
+
+[providers.anthropic_api]
+harness = "claude"
+key_file = "/nvme2n1/yuehan_zhang/.secrets/anthropic_api_key.txt"
+
+[providers.deepseek]
+harness = "claude"
+key_file = "/nvme2n1/yuehan_zhang/.secrets/deepseek_api_key.txt"
+base_url = "https://api.deepseek.com/anthropic"
+small_fast_model = "deepseek-flash"
+
+[providers.openai]
+harness = "codex"
+key_file = "/nvme2n1/yuehan_zhang/.secrets/openai_api_key.txt"
