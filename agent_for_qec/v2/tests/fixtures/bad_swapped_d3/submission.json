@@ -1,0 +1,2 @@
+{"title": "Z memory, rotated d=3, swapped (overclaims 3)", "kind": "memory", "description": "Z-basis memory, 3 rounds",
+ "code": {"n": 9, "k": 1, "d": 3}, "circuits": [{"name": "mem_Z", "claimed_circuit_distance": 3}], "depends_on": []}

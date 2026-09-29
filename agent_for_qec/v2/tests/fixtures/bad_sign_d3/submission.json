@@ -1,0 +1,3 @@
+{"title": "Transversal CNOT, rotated surface code d=3, perpendicular SE (wrong sign)", "kind": "logical_gate",
+ "description": "CNOT_L from control to target: X_c -> X_c X_t, Z_t -> Z_c Z_t, X_t -> X_t, Z_c -> Z_c.",
+ "code": {"n": 9, "k": 1, "d": 3}, "circuits": [{"name": "cnot_ZZ", "claimed_circuit_distance": 3}], "depends_on": []}
