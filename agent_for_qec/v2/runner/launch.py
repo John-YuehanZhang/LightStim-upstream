@@ -53,6 +53,7 @@ SOCK_IN_SANDBOX = "/tmp/qec"
 
 BASE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task"]
 ROLE_TOOLS = {
+    "planner": BASE_TOOLS,
     "main": BASE_TOOLS,
     "worker": BASE_TOOLS,
     "refuter": BASE_TOOLS,
@@ -93,21 +94,26 @@ def build_prompt(role: str, project: str, worker: str, st: Store) -> str:
     return tpl
 
 
-def harness_binary() -> str:
+def harness_binary(harness: str = "claude") -> str:
     import shutil
-    b = shutil.which("claude")
+    b = shutil.which(harness)
     if not b:
-        raise RuntimeError("claude binary not found")
+        raise RuntimeError(f"{harness} binary not found")
     return str(Path(b).resolve())
 
 
-def sandbox_cmd(inner, *, project, wdir, home, sock_dir):
+def sandbox_cmd(inner, *, project, wdir, home, sock_dir, harness="claude"):
     pyenv = str(Path(PY).resolve().parents[1])
     results = V2 / "results" / project
     results.mkdir(parents=True, exist_ok=True)
+    hb = harness_binary(harness)
+    ro = [pyenv, str(Path(hb).parent), str(REPO)]
+    real = str(Path(hb).resolve().parent)         # the binary may be a symlink into a versions dir
+    if real not in ro:
+        ro.append(real)
     return sandbox.wrap_agent(
         inner,
-        readonly=[pyenv, str(Path(harness_binary()).parent), str(REPO)],
+        readonly=ro,
         hide=[str(REPO / h) for h in HIDE_IN_REPO],
         readonly_after=[str(results)],
         writable=[str(wdir), str(home)],
@@ -118,7 +124,8 @@ def sandbox_cmd(inner, *, project, wdir, home, sock_dir):
 def sandbox_env(lease_env: dict, home: Path) -> dict:
     pyenv = str(Path(PY).resolve().parents[1])
     env = {"PATH": f"{pyenv}/bin:/usr/local/bin:/usr/bin:/bin", "HOME": str(home),
-           "CLAUDE_CONFIG_DIR": str(home / ".claude"), "LANG": os.environ.get("LANG", "C.UTF-8"),
+           "CLAUDE_CONFIG_DIR": str(home / ".claude"), "CODEX_HOME": str(home / ".codex"),
+           "LANG": os.environ.get("LANG", "C.UTF-8"),
            "TMPDIR": "/tmp", "PYTHONPATH": str(REPO), "QEC_SOCKET": f"{SOCK_IN_SANDBOX}/sock",
            "DISABLE_AUTOUPDATER": "1"}
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "no_proxy", "NO_PROXY"):
@@ -128,11 +135,25 @@ def sandbox_env(lease_env: dict, home: Path) -> dict:
     return env
 
 
-def harness_cmd(role: str, model: str, prompt_file: Path, settings_file: Path, turns: int) -> list:
-    return [harness_binary(), "-p", prompt_file.read_text(), "--model", model,
-            "--tools", ",".join(ROLE_TOOLS[role]), "--setting-sources", "user", "--settings", str(settings_file),
-            "--strict-mcp-config", "--permission-mode", "dontAsk", "--max-turns", str(turns),
-            "--output-format", "stream-json", "--verbose"]
+def harness_cmd(role: str, model: str, prompt_file: Path, settings_file: Path, turns: int, harness: str = "claude",
+                wdir: Path = None, pcfg: dict = None) -> list:
+    if harness == "claude":
+        return [harness_binary(), "-p", prompt_file.read_text(), "--model", model,
+                "--tools", ",".join(ROLE_TOOLS[role]), "--setting-sources", "user", "--settings", str(settings_file),
+                "--strict-mcp-config", "--permission-mode", "dontAsk", "--max-turns", str(turns),
+                "--output-format", "stream-json", "--verbose"]
+    if harness == "codex":
+        # Codex CLI (OpenAI). Its own sandbox is bypassed because the process already runs inside
+        # bwrap; web search is disabled except for the novelty role; the prompt is read from stdin.
+        cmd = [harness_binary("codex"), "exec", "--json", "--skip-git-repo-check", "--ephemeral",
+               "--ignore-user-config", "--dangerously-bypass-approvals-and-sandbox", "-m", model,
+               "-C", str(wdir), "-o", str(wdir / ".last_message.txt"),
+               "-c", f'model_reasoning_effort="{(pcfg or {}).get("reasoning_effort", "high")}"',
+               "-c", 'shell_environment_policy.inherit="all"']
+        if role != "novelty":
+            cmd += ["-c", 'web_search="disabled"']
+        return cmd + ["-"]
+    raise ValueError(f"unknown harness {harness}")
 
 
 def subagent_limit(headroom: float, ocfg: dict) -> int:
@@ -182,6 +203,39 @@ class CpuSlot:
         if self.fh is not None:
             self.fh.close()
             self.fh = None
+
+
+def parse_codex_log(log: Path, prices: dict = None) -> dict:
+    """Codex `exec --json` events -> the same summary shape as Claude's result line."""
+    usage, turns, last, failed = {}, 0, "", None
+    if log.exists():
+        for line in log.read_text(errors="ignore").splitlines():
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            t = d.get("type")
+            if t == "turn.completed":
+                for k, v in (d.get("usage") or {}).items():
+                    usage[k] = usage.get(k, 0) + (v or 0)
+            elif t == "item.completed":
+                it = d.get("item") or {}
+                turns += it.get("type") == "command_execution"
+                if it.get("type") == "agent_message":
+                    last = it.get("text") or last
+            elif t == "turn.failed":
+                failed = (d.get("error") or {}).get("message", "turn failed")
+    cost = None
+    if prices:
+        cost = ((usage.get("input_tokens", 0) - usage.get("cached_input_tokens", 0)) * prices.get("input", 0)
+                + usage.get("cached_input_tokens", 0) * prices.get("cached_input", 0)
+                + usage.get("output_tokens", 0) * prices.get("output", 0)) / 1e6
+    res = {"result": failed or last, "is_error": failed is not None, "num_turns": turns, "total_cost_usd": cost,
+           "usage": {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
+                     "cache_read_input_tokens": usage.get("cached_input_tokens"),
+                     "cache_creation_input_tokens": usage.get("cache_write_input_tokens")}}
+    rejected = {"rateLimitType": "openai_429"} if failed and ("429" in failed or "rate limit" in failed.lower()) else None
+    return {"result": res if (usage or failed) else {}, "rejected": rejected}
 
 
 def parse_log(log: Path) -> dict:
@@ -236,13 +290,16 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     (home / ".claude").mkdir(parents=True, exist_ok=True)
     settings_file = home / ".claude" / "settings.json"
     settings_file.write_text(json.dumps(role_settings(role), indent=1))
-    inner = harness_cmd(role, rcfg["model"], pfile, settings_file, turns)
+    pcfg = cfg["providers"][rcfg["provider"]]
+    harness = pcfg.get("harness", "claude")
+    inner = harness_cmd(role, rcfg["model"], pfile, settings_file, turns, harness=harness, wdir=wdir, pcfg=pcfg)
 
     if dry_run:
-        cmd = sandbox_cmd(inner, project=project, wdir=wdir, home=home, sock_dir="<socket dir>")
-        i = cmd.index("-p")
-        cmd[i + 1] = f"<prompt {len(prompt)} chars sha {psha[:12]}>"
-        return {"cmd": cmd, "prompt_file": str(pfile), "settings": role_settings(role)}
+        cmd = sandbox_cmd(inner, project=project, wdir=wdir, home=home, sock_dir="<socket dir>", harness=harness)
+        if "-p" in cmd:
+            i = cmd.index("-p")
+            cmd[i + 1] = f"<prompt {len(prompt)} chars sha {psha[:12]}>"
+        return {"cmd": cmd, "prompt_file": str(pfile), "settings": role_settings(role), "harness": harness}
 
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
     slot = CpuSlot(cfg.get("orchestrator", {}))
@@ -264,13 +321,22 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
     sock_dir = service.endpoint(role, worker, [str(wdir)], run_id=run_id)
     st.set_operating_rules(worker, process_rules(subagent_limit(lease.headroom, cfg.get("orchestrator", {}))))
     cmd = ["taskset", "-c", slot.cpus] + sandbox_cmd(inner, project=project, wdir=wdir, home=home,
-                                                      sock_dir=sock_dir)
+                                                      sock_dir=sock_dir, harness=harness)
     proxy = RecordingProxy(log.with_suffix(".net.log"), f"{role}/{worker}")
     env = {**sandbox_env(lease.env, home), **proxy.env()}
+    if harness == "codex":     # log the CLI into the process's private CODEX_HOME on the host side
+        (home / ".codex").mkdir(parents=True, exist_ok=True)
+        subprocess.run([harness_binary("codex"), "login", "--with-api-key"], input=lease.extra["api_key"],
+                       text=True, env={**os.environ, "CODEX_HOME": str(home / ".codex")}, capture_output=True,
+                       check=True)
+    stdin = subprocess.DEVNULL if harness == "claude" else subprocess.PIPE
     try:
         with open(log, "w") as out, open(log.with_suffix(".err"), "w") as err:
-            p = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+            p = subprocess.Popen(cmd, env=env, stdin=stdin, stdout=out, stderr=err,
                                  start_new_session=True)
+            if harness == "codex":
+                p.stdin.write(prompt.encode())
+                p.stdin.close()
             try:
                 rc = p.wait(timeout=rcfg.get("wall_hours", 4.5) * 3600)
             except subprocess.TimeoutExpired:
@@ -283,7 +349,8 @@ def run(project: str, role: str, worker: str, dry_run: bool = False, config_path
         service.close(sock_dir)
         if own_service:
             service.shutdown()
-    parsed = parse_log(log)
+    parsed = parse_codex_log(log, (pcfg.get("prices") or {}).get(rcfg["model"])) if harness == "codex" \
+        else parse_log(log)
     res, rej = parsed["result"], parsed["rejected"]
     cost = res.get("total_cost_usd") or 0
     u = res.get("usage") or {}

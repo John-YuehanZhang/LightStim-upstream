@@ -195,6 +195,9 @@ class Orchestrator:
         st = Store(a.project)
         try:
             for i in range(a.rounds):
+                if Store(a.project).get("stop_requested"):
+                    log("stop requested by the portfolio planner; no further rounds")
+                    break
                 if not (i == 0 and a.skip_main_first):
                     rnd = st.current_round() + 1
                     st.set("round", rnd)

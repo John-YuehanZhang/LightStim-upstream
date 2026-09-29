@@ -2,7 +2,7 @@
 """Regression tests for the v2 gate, store and service. Run from the repository root:
     PYTHONPATH=. /home/yuehan/miniconda3/envs/light_stim/bin/python agent_for_qec/v2/tests/run_tests.py
 Uses throw-away QEC_RUNTIME_ROOT / QEC_RESULTS_ROOT directories."""
-import json, os, socket, subprocess, sys, tempfile, time
+import json, os, signal, socket, subprocess, sys, tempfile, time
 from pathlib import Path
 
 V2 = Path(__file__).resolve().parents[1]
@@ -241,6 +241,57 @@ check("facts record raw resource quantities", rs and all(r and "full_circuit" in
 o.round_rules(st, [], closing=True)
 check("closing-pass rules say no assignments run", "closing pass" in Store("t").operating_rules_for("x")[0]["claim"], "")
 o.service.shutdown()
+# ---- v2.2: shared library, topics, planner role, external dependencies, codex log parsing, portfolio
+from library import Library  # noqa: E402
+lib = Library(); lib.sync()
+check("library sync sees facts of project t", any(r["project"] == "t" for r in lib.facts()), "")
+check("library notes include dead ends/findings", isinstance(lib.notes(), list), "")
+out, code = run(["propose", "--name", "x1", "--layer", "2", "--title", "t", "--file", str(Path(TMP, "task.md")),
+                 "--rationale", "r"], role="worker", worker="w1", project="pf")
+check("worker cannot propose topics", code == 13, out.strip()[:80])
+Path(TMP, "topic.md").write_text("# topic\n" + "A focused task statement for the main agent. " * 8)
+out, code = run(["propose", "--name", "x1", "--layer", "2", "--title", "H on BB", "--file", str(Path(TMP, "topic.md")),
+                 "--rationale", "r", "--rounds", "2"], role="planner", worker="planner", project="pf")
+check("planner proposes a topic", code == 0 and lib.topic("x1") is not None, out.strip()[:100])
+out, code = run(["propose", "--name", "x1", "--layer", "2", "--title", "H on BB", "--file", str(Path(TMP, "topic.md"))],
+                role="planner", worker="planner", project="pf")
+check("duplicate topic name refused", code != 0, out.strip()[:80])
+out, code = run(["library", "topics"], role="worker", worker="w1", project="t")
+check("any role can list topics", code == 0 and "x1" in out, out.strip()[:80])
+out, code = run(["close-topic", "x1", "--reason", "settled"], role="planner", worker="planner", project="pf")
+check("planner closes a topic", code == 0 and Library().topic("x1")["status"] == "closed", out.strip()[:80])
+act = [r for r in lib.facts() if r["project"] == "t" and r["status"] == "active"]
+d = Path(TMP, "extdep"); shutil.copytree(V2 / "tests/fixtures/good_cnot_d3", d)
+sj = json.loads((d / "submission.json").read_text()); sj["title"] += " ext"; sj["external_depends_on"] = [f"t/{act[0]['id'][:10]}"]
+(d / "submission.json").write_text(json.dumps(sj))
+h, _ = submit(d)
+check("external dependency on another project's active fact is recorded",
+      h.get("outcome") == "accepted" and json.loads(Store("t").fact(h["fact_id"], exact=True)["claims"])["external_depends_on"][0].startswith("t/"),
+      str(h.get("reason"))[:120])
+sj["title"] += " bad"; sj["external_depends_on"] = ["nowhere/deadbeef00"]; (d / "submission.json").write_text(json.dumps(sj))
+h, _ = submit(d)
+check("unknown external dependency is an error", h.get("outcome") == "error", str(h.get("reason"))[:100])
+cx = launch.parse_codex_log(V2 / "tests/fixtures/codex_exec_sample.jsonl", {"input": 1.0, "cached_input": 0.5, "output": 10.0})
+check("codex log parsed: tokens, turns, message, cost", cx["result"]["usage"]["output_tokens"] == 1029 and
+      cx["result"]["num_turns"] == 2 and not cx["result"]["is_error"] and abs(cx["result"]["total_cost_usd"] -
+      ((22053 - 13312) * 1.0 + 13312 * 0.5 + 1029 * 10.0) / 1e6) < 1e-9, json.dumps(cx["result"])[:200])
+dcx = launch.run("t", "worker", "w1", dry_run=True, config_path=None)
+check("dry run (claude) has no codex flags", "exec" not in dcx["cmd"], "")
+import portfolio  # noqa: E402
+Path(TMP, "pf_task.md").write_text("# overall\n")
+pf = portfolio.Portfolio(_ap.Namespace(portfolio="pf", task=str(Path(TMP, "pf_task.md")), cycles=1, origin="calibration",
+                                       noise_p=1e-3, config=None, wait_hours=2, max_wait_hours=0))
+pf.init()
+Library().set_topic("x1", status="proposed")
+pf.start_topics()
+pst = Store("pf__x1")
+check("portfolio turns a proposed topic into an initialised project",
+      Library().topic("x1")["status"] == "running" and pst.get("topic") == "x1" and Path(pst.get("task_path")).exists()
+      and "focused task statement" in Path(pst.get("task_path")).read_text(), "")
+for p_ in pf.procs.values():
+    os.killpg(p_.pid, signal.SIGTERM)
+pf.service.shutdown()
+check("portfolio store is excluded from the library", Store("pf").get("library") is False, "")
 # ---- render
 out, code = run(["render"])
 check("render works", code == 0, out.strip()[:80])

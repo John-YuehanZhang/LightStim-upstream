@@ -356,6 +356,11 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
                 raise ValueError("rounds must be {\"before\": int, \"operation\": int, \"after\": int}")
         deps = [store.resolve_fact_id(d) for d in (spec.get("depends_on") or [])]
         report["depends_on"] = deps
+        ext = spec.get("external_depends_on") or []
+        if ext:
+            from library import Library
+            lib = Library()
+            report["external_depends_on"] = [f"{r['project']}/{r['id']}" for r in (lib.external_fact(x) for x in ext)]
         existing = store.fact(sub_id, exact=True)
         if existing is not None:
             report.update(outcome="duplicate", fact_id=sub_id,
@@ -420,6 +425,7 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
         report["outcome"] = "accepted"
         fact_id = sub_id
         claims = {k: spec.get(k) for k in ("code", "circuits", "description", "kind", "title", "layer", "compared_to")}
+        claims["external_depends_on"] = report.get("external_depends_on") or []
         try:
             store.add_fact(fact_id, kind, spec.get("title"), claims, report, deps, sub_id, author,
                            origin=store.get("origin", "agent"), run_id=run_id)
@@ -428,6 +434,14 @@ def run_gate(sub_dir: Path, store, author: str, milp_time_s: float = 1800.0, cod
                 shutil.rmtree(dest)
             shutil.copytree(sub_dir, dest / "bundle", ignore=shutil.ignore_patterns("__pycache__"))
             (dest / "verdict.json").write_text(json.dumps(report, indent=1, default=str))
+            # the built circuits, with detectors and observables, as submitted and as the gate
+            # noised them (standard model at p): everything later evaluation needs, no rebuild
+            cdir = dest / "circuits"
+            cdir.mkdir()
+            for f in sorted((out / "circuits").glob("*.stim")):
+                shutil.copy(f, cdir / f.name)
+                (cdir / f"{f.stem}.noisy_p{p:g}.stim").write_text(str(standard_noise(stim.Circuit(f.read_text()), p)))
+            shutil.copy(out / "code.json", dest / "code.json")
         except Exception as ex:
             report.update(outcome="error", reason=f"could not record fact: {ex}")
             fact_id = None

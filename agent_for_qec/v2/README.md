@@ -32,10 +32,28 @@ HiGHS (a SAT/LRAT certificate for the final rows is planned).
 | platform suitability (superconducting 2D, neutral atoms, trapped ions) | gate statistics; analysis after construction | ledger column |
 | novelty | novelty role (web search after the result exists) + human sign-off | `novelty_status`: prior_found / no_prior_found / human_confirmed_new |
 
+## Portfolio: planner, topics, shared library
+
+`runner/portfolio.py --portfolio NAME --task tasks/explore_v1/TASK.md` runs the
+top level. A **planner** agent (no web, no research of its own) reads the
+shared library and the topic list and opens topics (`qec.py propose`), each a
+single object of study (one code and one operation; or one new code with its
+operations). Every proposed topic becomes its own project `<portfolio>__<topic>`
+with its own main agent, workers and refuters (`orchestrate.py` in a separate
+process); the planner is woken again when projects finish and may close topics.
+Nothing caps the number of topics. The **library** (`lib/library.py`,
+`$QEC_RUNTIME_ROOT/library.sqlite`) is rebuilt from all project stores between
+cycles: facts with their refutation/novelty status, dead ends, obstacles,
+findings. Any role reads it (`qec.py library facts|notes|topics`); a
+submission may build on another project's fact via `external_depends_on`
+("<project>/<fact id>"); a revoked source revokes its dependants across
+projects.
+
 ## Roles and processes
 
 | role | runs | may | may not |
 |---|---|---|---|
+| planner | once per planning cycle | read the library and topics; propose and close topics | research; use the web |
 | main | once per round (+ closing pass) | read everything; publish route registry and guidance; assign workers; open challenges (number of refuters, focus); declare done | submit candidates; use the web |
 | worker | in parallel, one per assignment | build and test; submit to the gate; write memory | use the web; edit the gate or LightStim |
 | refuter | with the workers, one per challenge slot | attack one fact; record refuted (with a reproducible script) / doubtful / no_problem_found | read the workers' shared memory; use the web; revoke |
@@ -86,7 +104,7 @@ Accepted submissions are archived with the gate verdict in
 ## Prompts (for the paper)
 
 All prompts are English and version-controlled in `prompts/`:
-`main.md`, `worker.md`, `refuter.md`, `novelty.md`, `shared/submission_format.md`,
+`planner.md`, `main.md`, `worker.md`, `refuter.md`, `novelty.md`, `shared/submission_format.md`,
 and the domain files `domain/angles.md` and `domain/pitfalls.md` (placeholders
 to be rewritten by the operator). The exact text sent to every process is
 archived as `$QEC_RUNTIME_ROOT/<project>/prompts_used/<sha>_<role>.md` and its
@@ -96,8 +114,13 @@ SHA is recorded in the `runs` table.
 
 `config/models.toml` assigns a provider and model to each role. Providers:
 `claude_oauth` (pool of subscription tokens, probed and leased per process),
-`anthropic_api`, `deepseek` (Anthropic-compatible endpoint, runs in Claude
-Code), `openai` (needs the Codex CLI harness; not implemented yet).
+`anthropic_api`, `deepseek` (Anthropic-compatible endpoint, run in Claude
+Code), `openai` (run in the Codex CLI: the key is used on the host side to log
+the CLI into the process's private `CODEX_HOME`, never placed in the agent's
+environment; `web_search="disabled"` except for the novelty role; token usage is
+parsed from its JSONL events, USD from `[providers.openai.prices]` if filled).
+Each vendor's model runs in that vendor's own harness; the comparison is of
+model plus harness.
 
 ## Operator policy (never in prompts; given to agents as `operating_rules` memory)
 
@@ -160,6 +183,11 @@ marked valid may be used in the paper. Read RUNS.md before any result.
 - v2.1 (d2c5d76, fcd012d): gate hardened after review (gate-derived noise and
   segment, blocks, sandboxed build), agent processes in bubblewrap, socket
   service, quota-aware waves, resource budget removed from prompts.
+- v2.2 (later commits): raw resource quantities, run id and token counts per
+  fact/process, cost reported never enforced, no cap on workers; built and
+  noised stim circuits archived per fact; `evaluate_ler.py`; planner +
+  portfolio runner + shared library + external dependencies; Codex CLI harness
+  for OpenAI models.
 - v2.2: operating rules as agent memory; subagents restored under those rules;
   pitfalls reduced to check items (no results); refuters replace the reviewer,
   refuted facts listed separately for human decision; gate check P3b (blocks

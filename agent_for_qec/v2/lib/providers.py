@@ -43,6 +43,7 @@ class Lease:
     model: str
     headroom: float = 1.0
     _fh: Optional[object] = field(default=None, repr=False)
+    extra: dict = field(default_factory=dict, repr=False)
 
     def release(self):
         if self._fh is not None:
@@ -153,5 +154,7 @@ def acquire(role_cfg: dict, config: dict, runtime: Path) -> Lease:
                "ANTHROPIC_SMALL_FAST_MODEL": pcfg.get("small_fast_model", model)}
         return Lease(prov, "deepseek", env, "claude", model)
     if prov == "openai":
-        raise NotImplementedError("openai provider needs the Codex CLI harness; not implemented yet")
+        # the key never enters the agent environment: launch.py logs the Codex CLI into the
+        # process's private CODEX_HOME on the host side (codex login --with-api-key)
+        return Lease(prov, "openai", {}, "codex", model, extra={"api_key": _secret_line(pcfg["key_file"])})
     raise ValueError(f"unknown provider {prov}")

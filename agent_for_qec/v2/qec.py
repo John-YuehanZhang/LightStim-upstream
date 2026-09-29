@@ -23,6 +23,9 @@ which executes it with the role bound to that socket. Run without QEC_SOCKET
   revoke ID --reason R           (main, human)
   adjudicate ID --uphold|--reject --reason R   (human) decide a refuted fact
   novelty ID --status prior_found|no_prior_found --file F   (novelty, human)
+  library facts [--query Q] [--kind K] | notes [--query Q] | topics    (all roles) cross-project results
+  propose --name N --layer L --title T --file TASK --rationale R [--rounds R]   (planner) open a topic
+  close-topic NAME --reason R    (planner, human)
   sign-new ID                    (human)
   render                         (human) write results/<project>/LEDGER.md
   runinfo [--status valid|historical|void] [--note N]   (human) write RUN_INFO.md and RUNS.md
@@ -107,6 +110,10 @@ def c_status(cx, a):
     print(f"# project {st.project}   round {st.current_round()}   status {st.get('status', 'open')}")
     print(f"# you are role={cx.role} worker={cx.worker}\n")
     print_rules(st, cx.worker)
+    if cx.role == "planner":
+        print("Topics (`qec.py library topics`), results of all projects (`qec.py library facts|notes`).")
+        c_library(cx, argparse.Namespace(lib_cmd="topics"))
+        return
     if cx.role == "refuter":        # refuters see their challenge and nothing of the submitters' reasoning
         print("Your challenge: `qec.py assignment`. Facts: `qec.py fact <id>`; archived bundles are under the "
               "project results directory.")
@@ -305,6 +312,56 @@ def c_novelty(cx, a):
     print("novelty report recorded")
 
 
+def c_library(cx, a):
+    from library import Library
+    lib = Library()
+    if a.lib_cmd == "facts":
+        rows = lib.facts(a.query, a.kind, a.limit)
+        for r in rows:
+            print(f"{r['project']}/{r['id'][:12]}  {r['kind']:<19} [[{r['n']},{r['k']},{r['d']}]] layer={r['layer'] or '-'} "
+                  f"{r['status']} refute={r['refute_status']} novelty={r['novelty_status']}  {short(r['title'], 70)}")
+        if not rows:
+            print("(no facts in the library)")
+    elif a.lib_cmd == "notes":
+        rows = lib.notes(a.kind and [a.kind], a.query, a.limit)
+        for m in rows:
+            print(f"--- {m['project']} #{m['memory_id']} r{m['round']} {m['kind']} by {m['author']}\n{m['claim']}")
+            if m["evidence"] and not a.brief:
+                print("evidence: " + m["evidence"])
+        if not rows:
+            print("(no notes in the library)")
+    else:
+        rows = lib.topics()
+        for t in rows:
+            print(f"{t['name']:<40} layer={t['layer']} status={t['status']:<9} rounds={t['rounds']}  {short(t['title'], 60)}"
+                  + (f"  ({short(t['reason'], 60)})" if t["reason"] else ""))
+        if not rows:
+            print("(no topics)")
+
+
+def c_propose(cx, a):
+    cx.need("planner", "human")
+    from library import Library
+    task = Path(a.file).read_text()
+    if len(task.strip()) < 200:
+        raise ValueError("the task text is too short to be a focused topic (write the full task the main agent will get)")
+    Library().propose(cx.st.project, a.name, str(a.layer), a.title, task, a.rationale or "", 1, a.rounds)
+    cx.st.add_memory("plan", cx.worker, f"proposed topic {a.name} (layer {a.layer}): {a.title}", a.rationale or "")
+    print(f"topic {a.name} proposed; it becomes project {cx.st.project}__{a.name} when the portfolio runner picks it up")
+
+
+def c_close_topic(cx, a):
+    cx.need("planner", "human")
+    from library import Library
+    lib = Library()
+    t = lib.topic(a.name)
+    if t is None:
+        raise ValueError(f"no topic {a.name}")
+    lib.set_topic(a.name, status="closed", reason=a.reason)
+    cx.st.add_memory("plan", cx.worker, f"closed topic {a.name}", a.reason)
+    print(f"topic {a.name} closed (a running project finishes its current round and stops)")
+
+
 def c_sign_new(cx, a):
     cx.need("human")
     r = cx.st.fact(a.id)
@@ -375,6 +432,16 @@ def parser():
     p = sp.add_parser("novelty"); p.add_argument("id")
     p.add_argument("--status", required=True, choices=["prior_found", "no_prior_found"])
     p.add_argument("--file"); p.add_argument("--text"); p.set_defaults(fn=c_novelty)
+    p = sp.add_parser("library"); lsp = p.add_subparsers(dest="lib_cmd", required=True)
+    for name in ("facts", "notes", "topics"):
+        x = lsp.add_parser(name); x.add_argument("--query"); x.add_argument("--kind")
+        x.add_argument("--limit", type=int, default=100); x.add_argument("--brief", action="store_true")
+    p.set_defaults(fn=c_library)
+    p = sp.add_parser("propose"); p.add_argument("--name", required=True); p.add_argument("--layer", required=True)
+    p.add_argument("--title", required=True); p.add_argument("--file", required=True); p.add_argument("--rationale")
+    p.add_argument("--rounds", type=int, default=3); p.set_defaults(fn=c_propose)
+    p = sp.add_parser("close-topic"); p.add_argument("name"); p.add_argument("--reason", required=True)
+    p.set_defaults(fn=c_close_topic)
     p = sp.add_parser("sign-new"); p.add_argument("id"); p.set_defaults(fn=c_sign_new)
     sp.add_parser("render").set_defaults(fn=c_render)
     p = sp.add_parser("init"); p.add_argument("--task", required=True)

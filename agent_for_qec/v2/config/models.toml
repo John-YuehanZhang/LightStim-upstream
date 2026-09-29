@@ -24,6 +24,12 @@ model = "opus"
 max_turns = 120
 wall_hours = 2.0
 
+[roles.planner]
+provider = "claude_oauth"
+model = "opus"
+max_turns = 80
+wall_hours = 1.0
+
 [roles.novelty]
 provider = "claude_oauth"
 model = "opus"
@@ -50,6 +56,11 @@ small_fast_model = "deepseek-flash"
 [providers.openai]
 harness = "codex"
 key_file = "/nvme2n1/yuehan_zhang/.secrets/openai_api_key.txt"
+reasoning_effort = "high"
+# USD per 1M tokens, used only to report cost (tokens are always recorded). Fill in from the
+# OpenAI pricing page for each model used; absent entries leave cost_usd empty.
+[providers.openai.prices]
+# "gpt-5.5" = {input = 0.0, cached_input = 0.0, output = 0.0}
 
 # Operator limits for the round loop (never shown to agents).
 [orchestrator]
@@ -68,5 +79,7 @@ cpu_slots = 8
 
 [audit]
 # hosts the harness itself contacts; anything else in a solving role's proxy log is a finding
+# (Codex CLI contacts chatgpt.com and github.com at start-up on its own)
 harness_hosts = ["api.anthropic.com", "statsig.anthropic.com", "console.anthropic.com", "claude.ai",
-                 "sentry.io", "datadoghq.com", "api.deepseek.com", "downloads.claude.ai", "storage.googleapis.com"]
+                 "sentry.io", "datadoghq.com", "api.deepseek.com", "downloads.claude.ai", "storage.googleapis.com",
+                 "api.openai.com", "chatgpt.com", "github.com"]

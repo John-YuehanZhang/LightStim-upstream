@@ -16,7 +16,7 @@ from typing import Dict, Iterable, List, Optional
 
 HOME = os.path.expanduser("~")
 SECRET_DIRS = ["/nvme2n1/yuehan_zhang/.secrets", f"{HOME}/.ssh", f"{HOME}/.claude", f"{HOME}/.config/gh",
-               f"{HOME}/.aws", f"{HOME}/.gnupg"]
+               f"{HOME}/.aws", f"{HOME}/.gnupg", f"{HOME}/.codex"]
 SECRET_FILES = [f"{HOME}/.claude.json", f"{HOME}/.git-credentials", f"{HOME}/.netrc", f"{HOME}/.pypirc"]
 RUNTIME_ROOT_DEFAULT = "/nvme2n1/yuehan_zhang/agent_for_qec_runtime"
 
