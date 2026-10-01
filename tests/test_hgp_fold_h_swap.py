@@ -462,12 +462,13 @@ def test_harness_noisy_circuit_has_a_detector_error_model():
     assert dem.num_observables == 2
 
 
-def _circuit_level_distance(circuit):
-    """Exact minimum number of faults giving an undetected logical error.
+def _searched_logical_error_weight(circuit):
+    """Weight of an undetected logical error found by Stim's heuristic search.
 
-    The search caps must exceed the largest number of detectors any single
-    DEM error touches (HGP circuits have hyperedges), otherwise errors are
-    excluded from the search and the distance can be over-reported.
+    Retain every single DEM hyperedge, but still bound the number of
+    intermediate detection events. This can miss lower-weight errors, so
+    the returned weight is an upper bound on distance, not an exact-distance
+    certificate. A lower bound requires a separate exhaustive check or proof.
     """
     dem = circuit.detector_error_model(decompose_errors=False)
     max_degree = max(
@@ -485,21 +486,21 @@ def _circuit_level_distance(circuit):
 
 
 @pytest.mark.parametrize("noisy_swap", [True, False])
-def test_circuit_level_distance_of_18_2_3_is_three(noisy_swap):
-    """Full circuit-level distance of the gate equals the code distance (memory: 3)."""
+def test_search_finds_weight_three_logical_error_for_18_2_3(noisy_swap):
+    """The bounded search finds a weight-three undetected logical error."""
     circuit = build_quiet(lambda: build_hgp_gate_verification_circuit(
         hgp_18_2_3(), [(HS, {"noisy_swap": noisy_swap})], rounds=3, noise_params=NOISE
     ))
-    distance, max_degree = _circuit_level_distance(circuit)
+    weight, max_degree = _searched_logical_error_weight(circuit)
     assert max_degree <= 8
-    assert distance == 3
+    assert weight == 3
 
 
-def test_circuit_level_distance_of_13_1_3_is_three():
+def test_search_finds_weight_three_logical_error_for_13_1_3():
     circuit = build_quiet(lambda: build_hgp_gate_verification_circuit(
         hgp_13_1_3(), [(HS, {})], rounds=3, noise_params=NOISE
     ))
-    assert _circuit_level_distance(circuit)[0] == 3
+    assert _searched_logical_error_weight(circuit)[0] == 3
 
 
 # ---------------------------------------------------------------------------

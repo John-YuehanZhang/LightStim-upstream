@@ -460,7 +460,12 @@ def test_exact_action_at_a_non_zero_offset():
         assert tableau(x) == expected and tableau(z) == z
 
 
-def _circuit_level_distance(circuit):
+def _searched_logical_error_weight(circuit):
+    """Return a heuristic logical-error weight, an upper bound on distance.
+
+    All single DEM hyperedges are retained, but intermediate detection-event
+    sets are bounded; this search does not certify the absence of smaller errors.
+    """
     dem = circuit.detector_error_model(decompose_errors=False)
     max_degree = max(
         (sum(1 for t in inst.targets_copy() if t.is_relative_detector_id())
@@ -486,9 +491,11 @@ def test_no_minimum_weight_logical_contains_a_mirror_pair(name):
     ([(CZS, {})], ("Z", "Z")),
     ([(CZS, {}), (CZS_DAG, {})], ("X", "X")),
 ], ids=["single_Z", "round_trip_X"])
-def test_circuit_level_distance_is_three(name, rounds, gates, bases):
-    """Z/Z sees the X part of the phase- and CZ-layer noise and the X-check hyperedges;
+def test_search_finds_weight_three_logical_error(name, rounds, gates, bases):
+    """Find a weight-three witness, not an exact-distance certificate.
+
+    Z/Z sees the X part of the phase- and CZ-layer noise and the X-check hyperedges;
     the X/X round trip additionally sees Z⊗Z faults of the CZ layer on mirror pairs."""
     circuit = build_quiet(lambda: build_hgp_gate_verification_circuit(
         INSTANCES[name](), gates, init_basis=bases[0], measure_basis=bases[1], rounds=rounds, noise_params=NOISE))
-    assert _circuit_level_distance(circuit) == 3
+    assert _searched_logical_error_weight(circuit) == 3
