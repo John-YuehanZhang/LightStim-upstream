@@ -68,7 +68,7 @@ venv/bin/python -u notebooks/LogicalOps/run_bb_ppm.py \
   --output-dir "$HOME/bb_ppm_results"
 ```
 
-默认依次运行 `p = 0.001, 0.002, 0.003`，每点 50 shots。完成后输出 `~/bb_ppm_results/bb_ppm.executed.ipynb`，包含全部报告和 LER 图。
+默认依次运行 `p = 0.0001, 0.001, 0.002, 0.003`，每点 50 shots。完成后输出 `~/bb_ppm_results/bb_ppm.executed.ipynb`，包含全部报告和 LER 图。
 
 长时间运行建议在 `tmux` 中执行上述命令，或使用下面的后台方式；二选一即可：
 
@@ -111,7 +111,7 @@ logical qubit 1 是旋转 gadget 的辅助 pivot；一般数据目标使用 logi
 
 ```python
 ROUNDS = 10
-P_VALUES = (1e-3, 2e-3, 3e-3)
+P_VALUES = (1e-4, 1e-3, 2e-3, 3e-3)
 MAX_SHOTS, MAX_ERRORS, BATCH_SIZE = 50, 50, 50
 ```
 
