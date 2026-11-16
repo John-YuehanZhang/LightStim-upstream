@@ -1,0 +1,6 @@
+# Install LightStim first: python -m pip install -e ".[plot]"
+# Run the notebook with the same environment used by this Python interpreter.
+nbclient>=0.10
+nbformat>=5.10
+ipykernel>=6
+relay-bp[stim]==0.2.2

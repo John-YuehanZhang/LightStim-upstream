@@ -10,11 +10,11 @@ is not installed.
 User-facing params flow straight through ``DecoderConfig(params={...})`` to
 ``SinterDecoder_RelayBP``. The important ones (see upstream for the rest):
 
-    alpha               : float | None  -- disordered memory strength (None disables)
-    gamma0              : float = 0.1    -- ordered memory parameter
-    pre_iter            : int   = 60     -- BP iterations for the first ensemble
-    num_sets            : int   = 60     -- number of Relay-BP ensemble members
-    set_max_iter        : int   = 60     -- iterations per ensemble member
+    alpha               : float | None  -- min-sum scaling factor (None means 1)
+    gamma0              : float = 0.1    -- uniform memory strength of the first leg
+    pre_iter            : int   = 60     -- iteration cap for the first leg
+    num_sets            : int   = 60     -- number of additional relay legs
+    set_max_iter        : int   = 60     -- iteration cap per additional leg
     gamma_dist_interval : (float, float) = (-0.24, 0.66)  -- memory-weight range
     stop_nconv          : int   = 5      -- stop after this many converged solutions
     parallel            : bool  = False  -- relay_bp-internal threading

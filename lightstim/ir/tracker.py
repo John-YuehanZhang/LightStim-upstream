@@ -1013,6 +1013,40 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
             )
 
 
+    def process_pauli_feedback(self, pauli, records):
+        """Update live record expressions after a record-controlled Pauli.
+
+        ``records`` are absolute measurement indices (XOR, not a list of
+        independent conditions). A Pauli changes no unsigned support: it
+        toggles the sign record of exactly the anticommuting rows. Historical
+        record-only relations already captured in the past are unchanged.
+        """
+        parity = set()
+        for record in records:
+            if (not isinstance(record, (int, np.integer))
+                    or not 0 <= record < self.total_measurements):
+                raise ValueError("Feedback must refer to existing integer measurement records.")
+            parity.symmetric_difference_update((int(record),))
+        records = parity
+        n = self.num_qubits
+        vector = np.zeros(2 * n, dtype=np.uint8)
+        for q, letter in pauli.items():
+            if not isinstance(q, (int, np.integer)) or not 0 <= q < n:
+                raise ValueError(f"Invalid feedback qubit {q!r}.")
+            if letter not in ('I', 'X', 'Y', 'Z'):
+                raise ValueError(f"Invalid feedback Pauli {letter!r}.")
+            vector[q] = letter in ('X', 'Y')
+            vector[n + q] = letter in ('Z', 'Y')
+        if not records:
+            return
+        dual = np.concatenate((vector[n:], vector[:n]))
+        for bank in (self.stabilizers, self.logicals, self.absorbed_ops):
+            anti = (bank.matrix @ dual) % 2
+            # Assign through the public property so optional native banks
+            # reconcile their record state at the next operation boundary.
+            bank.records = [sorted(set(row) ^ records) if a else list(row)
+                            for row, a in zip(bank.records, anti)]
+
     def process_unitary_block(self, circuit_chunk: stim.Circuit):
         """Forward-propagate the tracked state through a Clifford circuit."""
         self._apply_symplectic_matrix(
@@ -1411,6 +1445,12 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
                 "ancillas with retained measured data qubits."
             )
         retain_measured_qubits = not discarded_measurement_qubit_indices
+        # Disposable ancillas can have been prepared (and entangled) in an
+        # earlier builder phase. Their output state must then come from the
+        # projected *current* tableau, not from nonexistent fresh reset rows.
+        # Use the retained-state construction first and eliminate the measured
+        # factors only after forward propagation to the output boundary.
+        project_current_state = retain_measured_qubits or reset_paulis is None
         current_base_idx = self.total_measurements
         self.total_measurements += num_meas
 
@@ -1425,7 +1465,8 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
             if self.logical_tracking == "slabs" else None)
 
         if (self._record_state_type is not None and self.logical_tracking == "slabs"
-                and circuit_chunk is not None):
+                and circuit_chunk is not None
+                and (retain_measured_qubits or reset_paulis is not None)):
             from .native_measurement import process_mid_measurement
 
             return process_mid_measurement(
@@ -1683,7 +1724,7 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
         if native_projection_pending:
             full_matrix[:] = record_state.rows()
             full_records[:] = record_state.records()
-        if retain_measured_qubits:
+        if project_current_state:
             # The projected measurement rows are the freshest representatives
             # of the post-measurement state. Keep an independent subset with
             # their current records, then complete the state basis from the
@@ -1705,14 +1746,14 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
         if self.logical_tracking == "slabs":
             refresh_complement_indices = self._v2_refresh_complement(
                 temp_full, num_stabs, num_logs,
-                measured_basis if retain_measured_qubits else back_propagated_paulis,
+                measured_basis if project_current_state else back_propagated_paulis,
             )
             # Absorbed rows are redundant witnesses, not additional physical
             # state. S/L refresh reuses the complement selected above.
             full_matrix = full_matrix[:num_stabs + num_logs]
             full_records = full_records[:num_stabs + num_logs]
 
-        if retain_measured_qubits:
+        if project_current_state:
             measured_records = [
                 [current_base_idx + idx]
                 for idx in measured_basis_indices
@@ -1726,7 +1767,52 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
             else:
                 reordered_targets = full_matrix
 
-            if self.logical_tracking == "slabs":
+            if not retain_measured_qubits:
+                # Keep known auxiliary/code constraints before choosing a
+                # logical complement. For a Bell check, its prepared XX row
+                # becomes the data check with the two readout records. If a
+                # data preparation were chosen first instead, that code
+                # constraint would disappear and be mislabeled as a second
+                # logical degree of freedom.
+                # Freshly prepared auxiliary constraints must win over old
+                # code constraints representing the same output direction.
+                # Their forward image folds into the *latest* readout parity.
+                # Choosing an old code row instead can anchor every future
+                # detector to a distant round (or a zeroed preparation frame),
+                # unnecessarily making a single fault flip many detectors.
+                outside_ancillas = np.ones(2 * self.num_qubits, dtype=bool)
+                for qubit in measured_qubit_set:
+                    outside_ancillas[qubit] = False
+                    outside_ancillas[self.num_qubits + qubit] = False
+                known_stabs = [i for i in range(num_stabs) if i in classified_rows]
+                auxiliary_stabs = [
+                    i for i in known_stabs
+                    if full_matrix[i].any() and not full_matrix[i, outside_ancillas].any()
+                ]
+                auxiliary_set = set(auxiliary_stabs)
+                known_stabs = auxiliary_stabs + [
+                    i for i in known_stabs if i not in auxiliary_set]
+                logical_indices = list(range(num_stabs, num_stabs + num_logs))
+                # Legacy retains the old L-first convention when a protected
+                # representative already exists. Its operator-only absorbed
+                # ledger cannot dress a newly measured S row as slabs can.
+                target_order = (
+                    (logical_indices + known_stabs if self.logical_tracking == "legacy"
+                     else known_stabs + logical_indices)
+                    + [i for i in range(num_stabs) if i not in classified_rows]
+                )
+                _, _, selected = solve_linear_decomposition(
+                    basis=measured_basis,
+                    targets=full_matrix[target_order],
+                    reduce_weight=False,
+                )
+                # Convert back to the existing [L; S] indexing below.
+                complement_indices = [
+                    target_order[i] - num_stabs if target_order[i] >= num_stabs
+                    else num_logs + target_order[i]
+                    for i in selected
+                ]
+            elif self.logical_tracking == "slabs":
                 complement_indices = refresh_complement_indices
             else:
                 _, _, complement_indices = solve_linear_decomposition(
@@ -1746,6 +1832,15 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
                     old_stab_basis_indices.append(
                         reordered_idx - num_logs
                     )
+
+            if not retain_measured_qubits:
+                # Keep every prepared auxiliary witness, including ones whose
+                # output checks are redundant. The ordinary reset-seeded path
+                # likewise keeps one row per measured check. Keeping only an
+                # independent subset would force redundant LDPC checks to be
+                # reconstructed from many other records in subsequent rounds.
+                old_stab_basis_indices = auxiliary_stabs + [
+                    i for i in old_stab_basis_indices if i not in auxiliary_set]
 
             old_stab_matrix = full_matrix[
                 old_stab_basis_indices
@@ -1795,11 +1890,53 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
                         )
                 self.post_select_row_indices = new_post_select_rows
 
-            self._apply_symplectic_matrix(forward_symplectic_matrix,
-                                          circuit_chunk=circuit_chunk)
+            # A reset-free syndrome block differs from a retained-data
+            # measurement only in its final discard operation. Folding uses
+            # the actual readout records; it does not reset, synthesize a
+            # state, or add any physical operation to the circuit.
+            discard = not retain_measured_qubits
+            native_fold = discard and record_state is not None and circuit_chunk is not None
+            self._apply_symplectic_matrix(
+                forward_symplectic_matrix,
+                circuit_chunk=circuit_chunk,
+                fold_measurements=(measurement_qubit_indices, measurement_bases,
+                                   current_base_idx) if native_fold else None,
+            )
+            promotable = set()
+            if discard:
+                if not native_fold:
+                    self._replace_measured_ancillas_with_records(
+                        measurement_qubit_indices=measurement_qubit_indices,
+                        measurement_bases=measurement_bases,
+                        measurement_base_idx=current_base_idx,
+                    )
+                # Fresh measurement rows now consist only of their measured
+                # ancilla factors and fold to identity. Drop all identity rows
+                # and reindex role/postselection metadata consistently.
+                kept = np.flatnonzero(np.any(self.stabilizers.matrix, axis=1)).tolist()
+                remap = {old: new for new, old in enumerate(kept)}
+                for position, old_idx in enumerate(old_stab_basis_indices):
+                    output_idx = len(measured_records) + position
+                    if (output_idx in remap and full_records[old_idx] == []
+                            and old_idx not in classified_rows):
+                        promotable.add(remap[output_idx])
+                self.stabilizers.matrix = self.stabilizers.matrix[kept].copy()
+                self.stabilizers.records = [self.stabilizers.records[i] for i in kept]
+                self._classified_stabilizer_rows = {
+                    remap[i] for i in self._classified_stabilizer_rows if i in remap}
+                self._dressed_stabilizer_rows = {
+                    remap[i] for i in self._dressed_stabilizer_rows if i in remap}
+                self.post_select_row_indices = {
+                    remap[i] for i in self.post_select_row_indices if i in remap}
+                self.stabilizer_with_logical_components = {
+                    remap[i] for i in self.stabilizer_with_logical_components if i in remap}
             if self.logical_tracking == "slabs":
                 self._v2_restore_postselection(
-                    self._v2_forward_postselection(postselection, forward_symplectic_matrix),
+                    self._v2_forward_postselection(
+                        postselection, forward_symplectic_matrix,
+                        measurement_qubit_indices=measurement_qubit_indices if discard else None,
+                        measurement_bases=measurement_bases if discard else None,
+                        measurement_base_idx=current_base_idx),
                     circuit=circuit, measurement_coords=measurement_coords)
             surviving_logical_indices = {
                 idx - num_stabs
@@ -1811,7 +1948,7 @@ class SyndromeTracker(BareDressedRoles, V2ReadoutMixin):
                 old_logicals_current_frame=propagate_paulis(
                     full_matrix[num_stabs:], forward_symplectic_matrix),
             )
-            return set()
+            return promotable
 
         # After detector construction, we always decompose the system into the "Clean Basis" of the measurements we just performed.
         # - Dependent rows in Full Tableau -> Replaced by Clean Measurements (Stabilizers).
