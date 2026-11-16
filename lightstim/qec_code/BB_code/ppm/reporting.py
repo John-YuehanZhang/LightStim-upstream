@@ -14,6 +14,7 @@ import re
 from collections import Counter
 from dataclasses import asdict
 from html import escape
+from io import BytesIO
 from itertools import groupby
 from pathlib import Path
 from typing import Iterable
@@ -354,6 +355,169 @@ def render_operation_table(rows: Iterable[dict]) -> str:
     return "".join(pieces)
 
 
+def render_operation_table_png(rows, *, row_height=40, scale=2) -> bytes:
+    """Draw records on a fixed grid and return a self-contained PNG.
+
+    Every operation occupies exactly ``row_height`` logical pixels, independent
+    of its group or text. Braces are painted inside that already-sized canvas.
+    A group's bounds are exactly its first row's top and last row's bottom;
+    its label is centered on their midpoint. The PNG is emitted at ``scale``
+    pixels per logical pixel so notebook previews can display crisp text.
+
+    Display this with IPython's Image (native image/png), not an HTML img. GitHub
+    can then scale the whole image without reflowing individual rows or braces.
+    ``bb_ppm_geometry`` in the PNG text metadata records the logical coordinates.
+    Rows are read only; this function never searches, samples or decodes.
+    """
+    from pathlib import Path
+
+    import matplotlib
+    from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
+
+    rows = list(rows)
+    if not isinstance(row_height, int) or row_height < 40:
+        raise ValueError("row_height must be an integer of at least 40 pixels")
+    if not isinstance(scale, int) or scale < 1:
+        raise ValueError("scale must be a positive integer")
+
+    font_dir = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+    font = ImageFont.truetype(str(font_dir / "DejaVuSans.ttf"), 14 * scale)
+    bold = ImageFont.truetype(str(font_dir / "DejaVuSans-Bold.ttf"), 14 * scale)
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    line_height, padding = 17, 12
+    max_lines = (row_height - 6) // line_height
+
+    def wrap(text, width):
+        # Preserve all words. Width expands globally if any cell would need
+        # more lines than the fixed row can hold; row heights never expand.
+        result, current = [], ""
+        for word in str(text).split():
+            candidate = f"{current} {word}" if current else word
+            if current and probe.textlength(candidate, font=font) > width * scale:
+                result.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            result.append(current)
+        return result or [""]
+
+    values = []
+    for row in rows:
+        detail, condition = str(row.get("detail", "")), str(row.get("condition") or "")
+        if row["operation"] == "PauliFrameUpdate" and condition:
+            detail = detail.partition(" if (")[0]
+        values.append([str(row["order"]), str(row["operation"]), detail, condition])
+
+    # Column widths are shared by all rows. Long record identifiers can widen
+    # a column, but can never change a single operation's height.
+    widths = [56, 160, 350, 430]
+    for column in range(4):
+        texts = [value[column] for value in values]
+        for text in texts:
+            for word in text.split():
+                widths[column] = max(widths[column], int(probe.textlength(word, font=font) / scale) + 2 * padding + 1)
+        while any(len(wrap(text, widths[column] - 2 * padding)) > max_lines for text in texts):
+            widths[column] += 20
+
+    groups, offset = [], 0
+    header_height = 40
+    for (step, group), iterator in groupby(rows, key=lambda row: (row["step"], row["group"])):
+        members = list(iterator)
+        top = header_height + offset * row_height
+        bottom = top + len(members) * row_height
+        groups.append({"step": step, "group": group, "rows": len(members),
+                       "top": top, "bottom": bottom, "height": bottom - top,
+                       "label_center_y": (top + bottom) / 2})
+        offset += len(members)
+    labels = [f"PPM {group['step']} — {group['group']}" for group in groups]
+    phase_width = max([180] + [int(probe.textlength(label, font=bold) / scale) + 48 for label in labels])
+    table_width = sum(widths)
+    width = table_width + phase_width
+    # A one-pixel bottom margin includes the final rule; it is not part of a row.
+    height = header_height + len(rows) * row_height + 1
+    image = Image.new("RGB", (width * scale, height * scale), "white")
+    draw = ImageDraw.Draw(image)
+    ink, muted, rule = "#18212f", "#34445a", "#d8dee8"
+
+    def rectangle(bounds, fill):
+        draw.rectangle(tuple(round(value * scale) for value in bounds), fill=fill)
+
+    def centered_text(x, y, text, *, center=False, strong=False):
+        chosen = bold if strong else font
+        left, top, right, bottom = draw.textbbox((0, 0), text, font=chosen)
+        x_px = x * scale - ((right - left) / 2 if center else 0) - left
+        y_px = y * scale - (bottom - top) / 2 - top
+        draw.text((round(x_px), round(y_px)), text, font=chosen, fill=ink)
+
+    rectangle((0, 0, table_width, header_height), "#e9edf4")
+    x = 0
+    for i, label in enumerate(("order", "operation", "detail", "condition")):
+        centered_text(x + (widths[i] / 2 if i == 0 else padding), header_height / 2,
+                      label, center=i == 0, strong=True)
+        x += widths[i]
+    centered_text(table_width + 44, header_height / 2, "group", strong=True)
+
+    for index, value in enumerate(values):
+        top = header_height + index * row_height
+        rectangle((0, top, table_width, top + row_height), "#f6f8fb" if index % 2 else "white")
+        x = 0
+        for column, text in enumerate(value):
+            lines = wrap(text, widths[column] - 2 * padding)
+            middle = top + row_height / 2
+            for line_index, line in enumerate(lines):
+                y = middle + (line_index - (len(lines) - 1) / 2) * line_height
+                centered_text(x + (widths[column] / 2 if column == 0 else padding), y,
+                              line, center=column == 0)
+            x += widths[column]
+        draw.line([(0, (top + row_height) * scale), (table_width * scale, (top + row_height) * scale)],
+                  fill=rule, width=scale)
+
+    # A right-facing brace consists only of points in the group's bounds. All
+    # groups, including a one-row central measurement, use the same x geometry.
+    for group, label in zip(groups, labels):
+        x, top, span = table_width + 10, group["top"], group["height"]
+        points = []
+        segments = [
+            ((0, 0), (12, 0), (12, .10), (12, .22)),
+            ((12, .22), (12, .39), (12, .46), (22, .50)),
+            ((22, .50), (12, .54), (12, .61), (12, .78)),
+            ((12, .78), (12, .90), (12, 1), (0, 1)),
+        ]
+        for segment in segments:
+            for i in range(33):
+                t, u = i / 32, 1 - i / 32
+                weights = (u ** 3, 3 * u * u * t, 3 * u * t * t, t ** 3)
+                px = x + sum(weight * point[0] for weight, point in zip(weights, segment))
+                py = top + span * sum(weight * point[1] for weight, point in zip(weights, segment))
+                points.append((round(px * scale), round(py * scale)))
+        draw.line(points, fill=muted, width=max(1, round(1.4 * scale)), joint="curve")
+        centered_text(table_width + 44, group["label_center_y"], label, strong=True)
+
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_text("bb_ppm_geometry", json.dumps({
+        "row_height": row_height, "header_height": header_height, "scale": scale,
+        "width": width, "height": height, "table_width": table_width,
+        "row_count": len(rows), "groups": groups,
+    }, ensure_ascii=False))
+    metadata.add_text("Description", "PPM operation table; every operation has the same fixed height.")
+    output = BytesIO()
+    image.save(output, format="PNG", pnginfo=metadata)
+    return output.getvalue()
+
+
+def operation_table_plain_text(rows):
+    """A complete, copyable fallback for the notebook's image/png output."""
+    lines = ["order | operation | detail | condition | group"]
+    for row in rows:
+        condition = str(row.get("condition") or "")
+        detail = str(row.get("detail", ""))
+        if row["operation"] == "PauliFrameUpdate" and condition:
+            detail = detail.partition(" if (")[0]
+        lines.append(f"{row['order']} | {row['operation']} | {detail} | {condition} | "
+                     f"PPM {row['step']} — {row['group']}")
+    return "\n".join(lines)
+
 def export_plan_report(compiler: BBPPMCompiler, plans: Iterable[BBPPMPlan], root) -> dict:
     """Export selected signed paths and existing operations, without searching.
 
@@ -457,4 +621,5 @@ def export_plan_report(compiler: BBPPMCompiler, plans: Iterable[BBPPMPlan], root
 
 
 __all__ = ["format_logical_pauli", "format_record_parity", "export_shift_and_native_catalogs",
-           "export_rotation_catalog", "export_plan_report", "render_operation_table"]
+           "export_rotation_catalog", "export_plan_report", "render_operation_table",
+           "render_operation_table_png", "operation_table_plain_text"]
