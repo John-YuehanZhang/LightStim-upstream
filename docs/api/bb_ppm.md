@@ -242,7 +242,7 @@ from lightstim.qec_code.BB_code.ppm.reporting import (
     export_shift_and_native_catalogs, export_rotation_catalog, export_plan_report,
 )
 
-basic_rows = export_basic_measurements(root / "basic_measurements")
+basic_rows = export_basic_measurements(root / "stabilizer_definition")
 catalogs = export_shift_and_native_catalogs(compiler, code, root)
 rotations = export_rotation_catalog(compiler, root)
 report = export_plan_report(compiler, plans, root)

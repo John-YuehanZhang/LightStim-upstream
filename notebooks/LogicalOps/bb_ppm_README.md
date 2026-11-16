@@ -144,7 +144,7 @@ venv/bin/python notebooks/LogicalOps/run_bb_ppm.py --help
 
 ```text
 ~/bb_ppm_results/
-  basic_measurements/       15 种基本测量的 stabilizer 定义
+  stabilizer_definition/    15 种基本测量的 stabilizer 定义
   shifts/                   shift 列表
   native_measurements/      shift 扩展后的基本测量
   rotation_axes/            可实现旋转轴及其实现
