@@ -1,16 +1,46 @@
-# Gross-code PPM：服务器运行说明
+# Gross-code PPM：Notebook 展示与固定参数实验
 
-本示例使用 gross code `[[144,12,12]]`，将输入的 PPM 序列编译为 shift、基本测量和 Pauli frame 修正，再交给 LightStim 现有的采样、解码和绘图工具。默认目标是 `X2 Z7 X12`，每个噪声点先运行 **50 shots**。使用电路级 Pauli 噪声，不包含 atom loss。
+本示例使用 gross code `[[144,12,12]]`，将默认目标 `X2 Z7 X12` 编译为 shift、基本测量和 Pauli frame 修正。Notebook 的前四个正式 cells 展示构造与搜索结果；Cell 5 是本次固定参数大样本实验的运行、续跑和结果展示入口。
 
-- 交互展示：[bb_ppm.ipynb](bb_ppm.ipynb)
-- 服务器入口：[run_bb_ppm.py](run_bb_ppm.py)
-- 详细接口与物理构造说明：[BB PPM API](../../docs/api/bb_ppm.md)
+- 交互入口：[bb_ppm.ipynb](bb_ppm.ipynb)
+- 保存完整输出的副本：[bb_ppm.executed.ipynb](bb_ppm.executed.ipynb)
+- 服务器执行入口：[run_bb_ppm.py](run_bb_ppm.py)
+- 结果展示与保存输出刷新：[bb_ppm_large_sample.py](bb_ppm_large_sample.py)
+- 本地任务读取与续跑接口：[bb_ppm_large_run.py](bb_ppm_large_run.py)
+- 物理构造与编译接口：[BB PPM API](../../docs/api/bb_ppm.md)
 
-服务器入口直接执行上述 notebook 的 cells；没有另写一套 LER 采样或失败判据。Cell 5 使用 Cell 4 生成的同一组 `plans`。
+两个 Notebook 保存相同的展示输出，可直接在支持 Notebook 的查看器中打开。**查看已保存的表格和图不需要服务器结果目录；执行或续跑本次实验需要原服务器上的完整运行文件。** Git 仓库不包含完整采样、解码检查点和冻结执行脚本，仅从 GitHub 新克隆仓库不能启动或恢复同一个实验。
 
-## 1. 下载分支并安装
+## 1. 当前实验设置
 
-以下命令在 Linux 服务器上执行。建议使用 Python 3.11 或 3.12，并始终使用本项目的虚拟环境。
+| 设置 | 固定值 |
+|---|---|
+| 目标 PPM | `X2 Z7 X12` |
+| 每次基本 LPU 测量的纠错轮数 | 10 |
+| 噪声模型 | LightStim 原有 `circuit_level_with_idling` |
+| 各噪声率 | `p_1q = p_2q = p_meas = p_reset = p_idle = p` |
+| `p = 0.0001` | 100,000 shots |
+| `p = 0.001` | 10,000 shots |
+| 解码并行上限 | 192 个 worker，每个 worker 1 个线程 |
+
+本次使用已经冻结的 Relay-BP 参数，不再根据大样本结果调参：
+
+```python
+DECODER_PARAMS = {
+    "alpha": 0.8, "gamma0": 0.5,
+    "pre_iter": 320, "num_sets": 600, "set_max_iter": 60,
+    "gamma_dist_interval": (-0.1, 0.5), "stop_nconv": 5,
+    "stopping_criterion": "nconv", "logging": False, "seed": 0,
+}
+```
+
+这些是针对当前完整 PPM 电路完成训练集搜索后选定的参数，不应称为论文原始参数。旧的论文参数基线、训练集和每点 50-shot 验证记录仍保存在各自目录，不并入本次大样本计数。
+
+本次按上述固定样本数完成实验，不按错误数提前停止。采样按固定种子分批保存；各批次按原顺序合并后解码，不筛选、不去重、不根据结果重新采样。完成数不足目标数时，Notebook 显示运行进度；部分结果不能当作已完成的固定样本统计。
+
+## 2. 下载分支并安装环境
+
+以下命令适用于 Linux，建议使用 Python 3.11 或 3.12：
 
 ```bash
 git clone --branch codex/bb-code-ppm --recurse-submodules \
@@ -22,9 +52,9 @@ venv/bin/python -m pip install -e '.[plot]'
 venv/bin/python -m pip install -r notebooks/LogicalOps/requirements-bb-ppm.txt
 ```
 
-如果服务器提供的是 Python 3.12，将 `python3.11` 换成 `python3.12`。安装会使用 C++ 编译工具构建可选加速模块；服务器需要可用的 C++ 编译器。若 Relay-BP 没有匹配该平台的预编译 wheel，pip 会尝试源码构建，届时还需要 Rust/Cargo 工具链。以安装报错为准补齐构建依赖。
+如果服务器提供 Python 3.12，将 `python3.11` 换成 `python3.12`。可选加速模块需要 C++ 编译工具；Relay-BP 若无匹配的 wheel，源码安装还可能需要 Rust/Cargo。依赖文件固定 `relay-bp[stim]==0.2.2`。不要从 Windows 复制虚拟环境到服务器。
 
-已有这个仓库时，先保存自己的改动，再切换和更新对应分支：
+已有仓库时，先保存自己的改动，再更新分支和子模块：
 
 ```bash
 git fetch origin
@@ -33,145 +63,93 @@ git pull --ff-only origin codex/bb-code-ppm
 git submodule update --init --recursive
 ```
 
-不要直接复制 Windows 的 `venv` 到服务器；在服务器上重新安装。上述专用依赖文件固定了 `relay-bp[stim]==0.2.2`，无需安装所有可选 decoder 或 GPU 依赖。
+上述步骤足以安装报告生成所需环境。恢复本次大样本实验还需保留原 `bb_ppm_results` 中的电路、矩阵、参数选择记录、冻结执行工具、采样文件及检查点；缺少或哈希不匹配时，入口应拒绝继续，而不能用新的随机样本冒充原任务。
 
-## 2. 先生成报告，检查环境
+## 3. 只生成前四个报告
 
-在仓库根目录执行：
+在仓库根目录运行：
 
 ```bash
 venv/bin/python -u notebooks/LogicalOps/run_bb_ppm.py \
-  --reports-only --threads 8 \
+  --reports-only --threads 1 \
   --output-dir "$HOME/bb_ppm_results"
 ```
 
-这一步只执行配置和前四个正式 cells，不构建完整 LER 物理电路，也不开始噪声采样。输出包含：
+这一步执行配置和前四个正式 cells，跳过带 `bb-ppm-ler` 标签的最终 Cell 5，不启动完整 LER 实验。
 
 | Cell | 输出 |
 |---|---|
-| 1 | 15 种基本 PPM，以及各自的 stabilizer 定义文件 |
-| 2 | 36 种逻辑 shift、540 个 shift 扩展后的 native measurements |
-| 3 | 245 个可实现的非平凡数据旋转轴，以及联合测量实现 |
-| 4 | 目标 PPM 的双向搜索记录、选中路径、按阶段标注的完整操作表 |
+| 1 | 15 种基本 PPM 及 stabilizer 定义文件 |
+| 2 | 36 种逻辑 shift 与 540 个扩展后的 native measurements |
+| 3 | 245 个非平凡数据旋转轴及联合测量实现 |
+| 4 | 双向搜索、选中路径和完整操作表 |
 
-生成的报告 notebook 是 `~/bb_ppm_results/bb_ppm.reports.ipynb`。可以下载到本地用 VS Code/Jupyter 查看，无需重新运行 cells。
+输出 Notebook 为 `~/bb_ppm_results/bb_ppm.reports.ipynb`。Cell 3 保留 `axis (A)` 和 `chosen_joint (Q₁A)` 表头；Cell 4 使用固定行高 PNG，分组高度等于行数乘以行高，GitHub 预览只整体缩放图片。打印路径使用相对路径。
 
-`--threads 8` 限制 Relay-BP 的内部线程数。请改成服务器或作业调度器实际分配的 CPU 数；这不改变论文的 decoder 数学参数。LightStim 的 `num_workers` 仍为 1，由 Relay-BP 内部并行处理。入口会自动用执行命令的 Python 创建临时 kernel，无需额外注册 Jupyter kernel。
+## 4. 连接现有实验并展示结果
 
-## 3. 在服务器运行 LER
+Notebook 配置 cell 使用：
 
-环境检查通过后，去掉 `--reports-only`：
+```python
+SHOTS_BY_P = {1e-4: 100000, 1e-3: 10000}
+WORKER_PROCESSES = 192
+THREADS_PER_WORKER = 1
+RESUME_IF_STOPPED = True
+```
+
+`LARGE_SAMPLE_RUN` 由环境变量 `BB_PPM_LARGE_SAMPLE_RUN` 指定；未设置时，默认目录为：
+
+```text
+<仓库父目录>/bb_ppm_results/full_circuit_tuning/large_sample_runs/20261117_frozen_192
+```
+
+在持有原运行文件的服务器上，可直接打开 Notebook 执行，或使用现有服务器入口：
 
 ```bash
+BB_PPM_LARGE_SAMPLE_RUN="$HOME/bb_ppm_results/full_circuit_tuning/large_sample_runs/20261117_frozen_192" \
 venv/bin/python -u notebooks/LogicalOps/run_bb_ppm.py \
-  --threads 8 \
+  --threads 1 \
   --output-dir "$HOME/bb_ppm_results"
 ```
 
-默认依次运行 `p = 0.0001, 0.001, 0.002, 0.003`，每点 50 shots。完成后输出 `~/bb_ppm_results/bb_ppm.executed.ipynb`，包含全部报告和 LER 图。
+这里的 `--threads 1` 设置 kernel 中的 Rayon 线程环境；**192 是解码 worker 总数，不是每个 worker 的线程数**。大样本执行器统一管理进程池和任务锁，不能把它改成 192 个 worker 各开 192 个线程。
 
-长时间运行建议在 `tmux` 中执行上述命令，或使用下面的后台方式；二选一即可：
+Cell 5 会核对 Cell 4 的目标与编译计划、冻结参数、采样预算和现有任务身份。任务已经运行时，Notebook 连接现有任务并读取进度，不再创建第二个解码池，也不打断正在运行的任务。任务停止时，`RESUME_IF_STOPPED=True` 允许通过既有运行入口续跑同一个已批准任务；设为 `False` 可只读取已有状态与结果。
 
-```bash
-mkdir -p "$HOME/bb_ppm_results"
-nohup venv/bin/python -u notebooks/LogicalOps/run_bb_ppm.py \
-  --threads 8 \
-  --output-dir "$HOME/bb_ppm_results" \
-  > "$HOME/bb_ppm_results/run.log" 2>&1 &
-echo $! > "$HOME/bb_ppm_results/runner.pid"
-tail -f "$HOME/bb_ppm_results/run.log"
-```
+该接口不会为任意新输入自动建立大样本实验。如果修改 `ppm_sequence`、物理电路、噪声、参数或预算，需要建立并核验新的 campaign；不能继续展示旧目标的计数作为新目标的结果。
 
-不要同时启动多个写入同一输出目录的任务。`tail -f` 中按 Ctrl+C 只停止查看日志；在前台运行入口时按 Ctrl+C 则中断该运行。入口会在正常异常或中断时保存已经完成的 notebook 输出；强制杀死进程无法保证保存正在执行的 cell 输出。
+## 5. 检查点、自动保存与本地文件
 
-论文参数的解码计算量较大，即使只有 50 shots，也可能运行数小时。进度通常在整批解码返回后更新；日志暂时不变不代表任务停止。服务器更快与否取决于 CPU、内存和可分配资源，这个入口不会自动改用 GPU。
+现有任务由独立的持久进程执行，Notebook 作为操作和展示界面。关闭 Notebook 不会取消已经运行的任务。保存的采样批次、合并输入与逐 shot 解码检查点用于续跑：已完成且通过哈希核验的批次和结果被保留；尚未保存完整结果的解码 shot 可能需要重新计算，但不会因此生成一批替代物理样本。
 
-## 4. 输入和参数在哪里修改
+`bb_ppm_large_sample.py` 的配套刷新流程从已保存检查点生成进度表和 LER 图，并更新 `bb_ppm.ipynb` 与 `bb_ppm.executed.ipynb` 中 Cell 5 的已保存输出。它保留前四个正式 cells 的表格和固定行高图片，不通过重跑完整 Notebook 刷新结果。刷新器应与当前 campaign 配套运行；仅下载一个 Notebook 文件不会启动后台刷新。
 
-编辑源文件 `notebooks/LogicalOps/bb_ppm.ipynb`，然后重新运行入口。不要修改生成的 executed notebook 来控制下次任务。
-
-**Cell 4 的 `ppm_sequence` 是测量序列输入**，逻辑编号从 1 开始。默认示例：
-
-```python
-ppm_sequence = [BBPPMStep(((2, "X"), (7, "Z"), (12, "X")))]
-```
-
-这表示一次 `X2 Z7 X12` 联合测量。多个元素表示按顺序执行多个 PPM。例如：
-
-```python
-ppm_sequence = [
-    BBPPMStep(((2, "X"), (8, "X"), (9, "X"))),
-    BBPPMStep(((2, "Z"),)),
-]
-```
-
-logical qubit 1 是旋转 gadget 的辅助 pivot；一般数据目标使用 logical qubits 2–12。
-
-最前面的**配置 cell**控制噪声点、采样预算和 syndrome-extraction 轮数：
-
-```python
-ROUNDS = 10
-P_VALUES = (1e-4, 1e-3, 2e-3, 3e-3)
-MAX_SHOTS, MAX_ERRORS, BATCH_SIZE = 50, 50, 50
-```
-
-当前两个停止上限都是 50，因此每点按 50 shots 运行。若增加采样量，也要检查 `MAX_ERRORS`：达到错误数上限同样会停止。`ROUNDS` 是每次基本 LPU 测量的纠错轮数，不是完整序列只测量十次。改变这些参数会改变实验或统计预算。
-
-保留以下 Relay-BP 配置即可使用当前对齐的论文参数：
-
-```python
-DECODER_PARAMS = {
-    "alpha": 1.0, "gamma0": 0.125,
-    "pre_iter": 80, "num_sets": 600, "set_max_iter": 60,
-    "gamma_dist_interval": (-0.24, 0.66), "stop_nconv": 5,
-    "stopping_criterion": "nconv", "parallel": True,
-}
-```
-
-初始 leg 最多 80 次迭代，最多再执行 600 个、每个最多 60 次迭代的 leg，并按 5 个收敛解的条件提前停止。参数来源与 memory 约定见 [Tour de gross Table 7](https://arxiv.org/html/2506.03094v1#A7.T7) 和 [Relay-BP Section IV / Figure 2](https://arxiv.org/html/2506.01779v1#S4)。
-
-入口的完整参数可用以下命令查看：
-
-```bash
-venv/bin/python notebooks/LogicalOps/run_bb_ppm.py --help
-```
-
-`--output-notebook PATH` 可指定执行后 notebook 的位置。未给 `--output-dir` 时，默认输出目录是仓库中的 `notebooks/LogicalOps/assets/bb_ppm/`。
-
-## 5. 查看结果与继续运行
-
-使用上面的输出目录时，文件结构为：
+本地文件大致分布如下：
 
 ```text
-~/bb_ppm_results/
-  stabilizer_definition/    15 种基本测量的 stabilizer 定义
-  shifts/                   shift 列表
-  native_measurements/      shift 扩展后的基本测量
-  rotation_axes/            可实现旋转轴及其实现
-  searches/                 输入 PPM 的路径与操作序列
-  ler/
-    <run_id>/
-      configuration.json    输入、decoder、噪声、预算及哈希
-      resources.json        电路规模、构建时间和运行环境
-      clean.stim            无噪物理电路
-      noisy_p_*.stim        各噪声点的物理电路
-      progress.log          采样/解码进度
-      results.csv           每个已完成噪声点的结果
-      ler.png               全部噪声点完成后的图
-    latest.json             最近一次完整运行的位置
-  bb_ppm.executed.ipynb      完整运行生成的 notebook
+bb_ppm_results/
+  ler/                         原完整 PPM 电路及历史基线
+  full_circuit_tuning/
+    original_lightstim/        冻结参数、训练与验证记录
+    decoder/                   冻结解码执行器
+    large_sample_tools/        采样、合并及持久任务工具
+    large_sample_runs/
+      20261117_frozen_192/
+        plan.json              固定预算、参数、来源哈希与执行顺序
+        status.json            当前任务状态
+        driver.log             持久任务日志
+        p0001/                 100,000-shot 输入与结果
+        p001/                  10,000-shot 输入与结果
 ```
 
-`run_id` 来自输入、编译计划、物理电路、配置、相关源码和软件版本的指纹。每完成一个噪声点，代码就保存一行结果。用**相同配置和相同输出目录**重新运行，会重建并核验电路、跳过完全匹配且已保存的噪声点，然后继续剩余点。尚未完成的 50-shot batch 没有可续接的 decoder 状态，需要重新计算该点。
+这些运行文件位于 Git 仓库之外；移动实验时必须保留完整依赖与来源关系，不能只复制 Notebook 或某一张结果表。当前保存和刷新操作只发生在本地，不自动提交或上传 GitHub。
 
-更改目标、噪声点列表、预算、相关源码或记录的软件版本后，会创建新的结果目录。新旧配置的结果不会自动混合。默认生成的 assets 属于可再生成文件，不随 Git 上传；服务器首次运行会重新生成它们。
+`run_bb_ppm.py --output-notebook PATH` 仍可指定服务器执行生成的 Notebook。它与配套刷新器更新的两个仓库内 Notebook 是不同的输出位置；不要把多个写入任务指向同一个文件。入口会使用当前 Python 创建临时 kernel，无需额外注册 Jupyter kernel。
 
-本地暂停前已保存的首批数据是 `p=0.001`、`12/50` 次失败、LER `0.24`；这些原始记录继续保存在本地。服务器从新安装环境开始时不会自动导入这条结果，也不应把未完成的另两点当作零失败。
+## 6. 如何解释结果
 
-## 6. 这张 LER 图的含义
+LER 的失败判据保持不变：decoder 对电路声明的 `OBSERVABLE_INCLUDE` 有任意一个预测错误，该 shot 计一次逻辑失败，LER 等于失败数除以实际完成的 shots。PPM 输出的 `+1` 或 `-1` 本身都不是失败标签。
 
-失败判据沿用 LightStim：decoder 对电路自动生成的 `OBSERVABLE_INCLUDE` 预测有任意一个错误，该 shot 就计作一次失败。这里没有 postselection，LER 为失败次数除以 shots。PPM 原始输出的 `+1` 或 `-1` 本身都不是失败标签。
+逻辑失败和未收敛分别统计。未满足 syndrome 的纠正即使恰好猜对所有 observables，也不能称为有效纠正成功。最终统计需等待该噪声点的固定样本全部完成；零次失败也不能证明真实 LER 为零，应结合样本数与置信区间阅读。
 
-报告的是当前初始化、完整 PPM 序列和末态读出能够检查的逻辑关联的错误率。它不是每个基本测量的 LER，也不单独验证随机 PPM 输出位。decoder 参数已经对齐；物理调度、内置噪声模型和完整实验边界仍是本实现的基线，不宣称精确复现论文 Table 2。
-
-50 shots 的统计误差较大。图中误差棒复用 LightStim 的 95% 正态近似；零错误或全失败在小样本下仍存在不确定性。完整结果表保留真实计数，之后可以增加预算再做精确比较。
+这里测量的是当前初始化、完整 `X2 Z7 X12` 操作序列与末态读出所检查的逻辑关联。原 LightStim 的物理调度、噪声实现和实验边界保持不变；它不是论文 Table 2 单条指令的 LER，也不声称精确复现论文结果。
