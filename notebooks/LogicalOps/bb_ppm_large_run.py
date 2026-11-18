@@ -5,7 +5,8 @@ only an explicit ``resume=True`` can start the already frozen external driver.
 No Stim, Relay, LightStim, or sampler module is imported here. Completed results
 are taken from the driver's published root summary after independent metadata,
 saved-row/count, parameter, and input-hash checks. Live partial rows never become
-LER estimates. This module is specific to the reviewed 20261117 campaign.
+LER estimates. The original two-point campaign and the additional midpoint
+campaign have separate immutable plans and independent samples.
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ import subprocess
 TUNING_ROOT = Path('/home/yuehan/bb_ppm_results/full_circuit_tuning')
 EXPECTED_RUN = TUNING_ROOT / 'large_sample_runs/20261117_frozen_192'
 EXPECTED_PLAN_SHA256 = '755d91b0d8e3b41235e0f88139be5037ab3c1de263e629d7c83a011e13377515'
+EXPECTED_MIDPOINT_RUN = TUNING_ROOT / 'large_sample_runs/20261118_p0005_192'
+EXPECTED_MIDPOINT_PLAN_SHA256 = 'b455e9d1810fa6251d02aacd90edeafd47e7124e990b609e7faa006838cc04f1'
 EXPECTED_SELECTION_SHA256 = '508392498c37d4a018422c9e0ca57824503a59118cd21f8748c792541977b654'
 PYTHON = Path('/home/yuehan/bb_code/venv/bin/python')
 RESOURCE_PATH = Path('/home/yuehan/bb_ppm_results/ler/57d014f2cc436091/resources.json')
@@ -51,8 +54,8 @@ def _fingerprint(value):
 
 def _verified_plan(run):
     run = Path(run).expanduser().resolve()
-    _require(run == EXPECTED_RUN.resolve(), 'This helper only supports the frozen campaign directory')
-    _require(_sha(run / 'plan.json') == EXPECTED_PLAN_SHA256, 'Frozen campaign plan changed')
+    expected_sha = expected_plan_sha(run)
+    _require(_sha(run / 'plan.json') == expected_sha, 'Frozen campaign plan changed')
     plan = _read(run / 'plan.json')
     _require(plan['workers'] == 192 and plan['threads_per_worker'] == 1, 'Unexpected worker policy')
     for relative, expected in plan['frozen_sources'].items():
@@ -77,6 +80,15 @@ def _verified_plan(run):
         _require(campaign['plan']['selection_sha256'] == EXPECTED_SELECTION_SHA256,
                  'Prepared selection changed')
     return run, plan, selection
+
+
+def expected_plan_sha(run):
+    run = Path(run).expanduser().resolve()
+    if run == EXPECTED_RUN.resolve():
+        return EXPECTED_PLAN_SHA256
+    _require(run == EXPECTED_MIDPOINT_RUN.resolve(), 'Unsupported frozen campaign directory')
+    _require(EXPECTED_MIDPOINT_PLAN_SHA256 is not None, 'Midpoint plan has not been frozen')
+    return EXPECTED_MIDPOINT_PLAN_SHA256
 
 
 def _locked(path):
@@ -189,7 +201,7 @@ def _validate_completed_row(run, plan, row):
              'Published CPU time disagrees')
 
 
-def read_run_snapshot(run: Path) -> dict:
+def _read_single_run_snapshot(run: Path) -> dict:
     """Return validated completed results and completion-only live progress.
 
     Keys: selection (full frozen document), parameters (selected settings),
@@ -199,21 +211,26 @@ def read_run_snapshot(run: Path) -> dict:
     locks ({orchestrator, executor}). No result is inferred from partial rows.
     """
     run, plan, selection = _verified_plan(run)
+    plan_sha = expected_plan_sha(run)
     status_path = run / 'status.json'
     state = _read(status_path) if status_path.exists() else {}
     if state.get('plan_sha256') is not None:
-        _require(state['plan_sha256'] == EXPECTED_PLAN_SHA256, 'Runtime state belongs to a different plan')
+        _require(state['plan_sha256'] == plan_sha, 'Runtime state belongs to a different plan')
     locks = _locks(run)
     results = []
     summary_path = run / 'summary.json'
     if summary_path.exists():
         summary = _read(summary_path)
-        _require(summary['plan_sha256'] == EXPECTED_PLAN_SHA256, 'Published summary belongs to another plan')
+        _require(summary['plan_sha256'] == plan_sha, 'Published summary belongs to another plan')
         results = summary['rows']
         _require(len(results) <= len(plan['cases']) and
                  len({r['p'] for r in results}) == len(results), 'Duplicate or excess published cases')
         for row in results:
             _validate_completed_row(run, plan, row)
+        if summary.get('status') == 'complete':
+            _require(len(results) == len(plan['cases']), 'Completed summary is missing a noise point')
+    if state.get('status') == 'complete':
+        _require(len(results) == len(plan['cases']), 'Completed campaign is missing its full results')
     progress = []
     for label, p, total in plan['cases']:
         directory = run / label / 'decoding'
@@ -239,8 +256,35 @@ def read_run_snapshot(run: Path) -> dict:
     return dict(selection=selection, parameters=plan['selected_parameters'],
                 workers=plan['workers'], threads_per_worker=plan['threads_per_worker'],
                 progress=progress, results=results, resources=_resources(),
-                updated_utc=datetime.now(timezone.utc).isoformat(), plan_sha256=EXPECTED_PLAN_SHA256,
+                updated_utc=datetime.now(timezone.utc).isoformat(), plan_sha256=plan_sha,
                 run_state=state.get('status', 'unknown'), live=any(locks.values()), locks=locks)
+
+
+def read_run_snapshot(run: Path, *, midpoint_run=None) -> dict:
+    """Validate each fixed-N cohort separately, then combine completed noise points."""
+    snapshot = _read_single_run_snapshot(run)
+    snapshot['campaign_plan_sha256s'] = [snapshot['plan_sha256']]
+    if midpoint_run is None:
+        return snapshot
+    _require(Path(run).resolve() == EXPECTED_RUN.resolve(), 'The base must be the original campaign')
+    _require(Path(midpoint_run).resolve() == EXPECTED_MIDPOINT_RUN.resolve(), 'Unexpected midpoint campaign')
+    extra = _read_single_run_snapshot(midpoint_run)
+    for key in ('parameters', 'workers', 'threads_per_worker', 'resources'):
+        _require(snapshot[key] == extra[key], f'Campaigns disagree on {key}')
+    _require({r['p']: r['shots_requested'] for r in extra['progress']} == {0.0005: 10000},
+             'Midpoint budget differs from the approved 10000 shots')
+    old_points = {r['p'] for r in snapshot['progress']}
+    _require(not old_points.intersection(r['p'] for r in extra['progress']), 'Overlapping noise-point cohorts')
+    snapshot['progress'] = sorted(snapshot['progress'] + extra['progress'], key=lambda r: r['p'])
+    snapshot['results'] = sorted(snapshot['results'] + extra['results'], key=lambda r: r['p'])
+    snapshot['campaign_plan_sha256s'].append(extra['plan_sha256'])
+    snapshot['locks'] = {'original': snapshot['locks'], 'midpoint': extra['locks']}
+    snapshot['live'] = snapshot['live'] or extra['live']
+    snapshot['run_state'] = ('complete' if len(snapshot['results']) == len(snapshot['progress'])
+                             else 'incomplete' if extra['run_state'] == 'complete'
+                             else extra['run_state'])
+    snapshot['updated_utc'] = extra['updated_utc']
+    return snapshot
 
 
 def attach_or_resume(run: Path, *, resume: bool = False) -> str:
@@ -266,8 +310,12 @@ def attach_or_resume(run: Path, *, resume: bool = False) -> str:
     # own nonblocking flock closes the race between this probe and its startup.
     logs = TUNING_ROOT / 'notebook_integration'
     logs.mkdir(exist_ok=True)
-    command = [str(PYTHON), str(TUNING_ROOT / 'large_sample_tools/run_large_campaign.py'),
-               '--merge-sha256', plan['frozen_sources']['large_sample_tools/merge_large_samples.py']]
+    if run == EXPECTED_MIDPOINT_RUN.resolve():
+        command = [str(PYTHON), str(TUNING_ROOT / 'large_sample_tools/run_p0005_campaign.py'),
+                   '--preparer-sha256', plan['frozen_sources']['large_sample_tools/prepare_midpoint_samples.py']]
+    else:
+        command = [str(PYTHON), str(TUNING_ROOT / 'large_sample_tools/run_large_campaign.py'),
+                   '--merge-sha256', plan['frozen_sources']['large_sample_tools/merge_large_samples.py']]
     env = dict(os.environ)
     for key in ('RAYON_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
         env[key] = '1'

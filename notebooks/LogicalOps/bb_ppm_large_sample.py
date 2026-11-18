@@ -14,7 +14,7 @@ import time
 for key in ('RAYON_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
     os.environ[key] = '1'
 
-from bb_ppm_large_run import read_run_snapshot, attach_or_resume, EXPECTED_PLAN_SHA256
+from bb_ppm_large_run import read_run_snapshot, attach_or_resume, expected_plan_sha
 
 COMPILED_PLAN_SHA = 'f028b3134db48c3f0f7a6c5b9ae97ddcd7c95cffcb59f8cfc0afc28ad1679a37'
 LER_TAG = 'bb-ppm-ler'
@@ -66,7 +66,8 @@ def render_outputs(snapshot):
         ('noise_model', 'Original LightStim circuit_level_with_idling'),
         ('worker_processes', snapshot['workers']), ('threads_per_worker', snapshot['threads_per_worker']),
         ('compiled_plan_sha256', COMPILED_PLAN_SHA), ('circuit_sha256', resources['circuit_sha256']),
-        ('campaign_plan_sha256', snapshot['plan_sha256']),
+        *[(f'campaign_{i + 1}_plan_sha256', value) for i, value in
+          enumerate(snapshot['campaign_plan_sha256s'])],
     ]
     outputs.append(table_output(pd.DataFrame(resource_rows, columns=['property', 'value'])))
     outputs.append(nbformat.v4.new_output('display_data', data={'text/html':'<hr>', 'text/plain':'─'*72}))
@@ -101,12 +102,14 @@ def render_outputs(snapshot):
     ax.errorbar([row['p'] for row in rows], rates,
         yerr=[[row['ler']-row['ler_95_exact_two_sided_low'] for row in rows],
               [row['ler_95_exact_two_sided_high']-row['ler'] for row in rows]],
-        fmt='o', markersize=7, color='#0072B2', capsize=5, linestyle='none')
+        fmt='o', markersize=7, color='#0072B2', capsize=5,
+        linestyle='-' if len(rows) == len(snapshot['progress']) else 'none', linewidth=1.5)
     upper = max(row['ler_95_exact_two_sided_high'] for row in rows)
     ax.set_ylim(-.08*upper, min(1.05, 1.25*upper))
     ax.set_xscale('log')
     ax.set_xlim(6e-5, 1.7e-3)
-    ax.set_xticks([1e-4, 1e-3], labels=['0.0001', '0.001'])
+    noise_points = sorted(row['p'] for row in snapshot['progress'])
+    ax.set_xticks(noise_points, labels=[f'{p:g}' for p in noise_points])
     ax.set_xlabel('Physical error probability p')
     ax.set_ylabel('Logical error rate of the full circuit')
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2, 2))
@@ -121,7 +124,7 @@ def render_outputs(snapshot):
     figure.clear()
     outputs.append(nbformat.v4.new_output('display_data', data={
         'image/png':base64.b64encode(png).decode('ascii'),
-        'text/plain':'Full-circuit LER with exact 95% binomial confidence intervals.'
+        'text/plain':'Full-circuit LER with exact 95% binomial confidence intervals; connecting lines guide the eye.'
     }, metadata={'image/png':{'width':800, 'height':540}}))
     if any(row['logical_failures'] == 0 for row in rows):
         outputs.append(nbformat.v4.new_output('stream', name='stdout', text=(
@@ -130,12 +133,12 @@ def render_outputs(snapshot):
 
 
 def display_campaign(run, *, expected_plan_sha256, decoder_params, shots_by_p,
-                     workers, resume=False):
+                     workers, resume=False, midpoint_run=None):
     """Notebook entry: attach, optionally resume, then display a verified snapshot."""
     run = Path(run).expanduser().resolve()
     if expected_plan_sha256 != COMPILED_PLAN_SHA:
         raise ValueError('This saved campaign does not match the Cell 4 compiled plan. Create a separate experiment for another target.')
-    snapshot = read_run_snapshot(run)
+    snapshot = read_run_snapshot(run, midpoint_run=midpoint_run)
     canonical = lambda value: json.dumps(value, sort_keys=True)
     if canonical(decoder_params) != canonical(snapshot['parameters']):
         raise ValueError('Notebook decoder parameters differ from the frozen campaign.')
@@ -143,7 +146,9 @@ def display_campaign(run, *, expected_plan_sha256, decoder_params, shots_by_p,
     if dict(shots_by_p) != requested or workers != snapshot['workers']:
         raise ValueError('Notebook shot counts or worker count differ from the approved campaign.')
     attach_or_resume(run, resume=resume)
-    snapshot = read_run_snapshot(run)
+    if midpoint_run is not None:
+        attach_or_resume(midpoint_run, resume=resume)
+    snapshot = read_run_snapshot(run, midpoint_run=midpoint_run)
     outputs, _ = render_outputs(snapshot)
     from IPython.display import display
     for output in outputs:
@@ -175,6 +180,7 @@ def save_notebook_outputs(path, outputs, snapshot, expected_guard):
     cell.metadata.pop('execution', None)
     cell.metadata['large_sample_snapshot'] = dict(
         updated_utc=snapshot['updated_utc'], campaign_plan_sha256=snapshot['plan_sha256'],
+        campaign_plan_sha256s=snapshot['campaign_plan_sha256s'],
         source='Verified saved campaign results; no sampling or decoding during output refresh.',
         completed_noise_points=[row['p'] for row in snapshot['results']])
     if notebook.metadata.get('bb_ppm_run', {}).get('mode') != 'frozen_campaign_snapshot':
@@ -183,12 +189,14 @@ def save_notebook_outputs(path, outputs, snapshot, expected_guard):
         if 'bb_ppm_provenance' in notebook.metadata:
             notebook.metadata['bb_ppm_historical_provenance'] = notebook.metadata['bb_ppm_provenance']
     notebook.metadata['bb_ppm_run'] = dict(
-        mode='frozen_campaign_snapshot', state='complete' if len(snapshot['results']) == 2 else snapshot['run_state'],
+        mode='frozen_campaign_snapshot',
+        state='complete' if len(snapshot['results']) == len(snapshot['progress']) else snapshot['run_state'],
         updated_utc=snapshot['updated_utc'], worker_processes=snapshot['workers'],
         threads_per_worker=snapshot['threads_per_worker'],
         note='Saved output refresh does not execute sampling or decoding; the frozen background campaign performs the computation.')
     notebook.metadata['bb_ppm_provenance'] = dict(
         kind='frozen_full_circuit_large_sample', campaign_plan_sha256=snapshot['plan_sha256'],
+        campaign_plan_sha256s=snapshot['campaign_plan_sha256s'],
         compiled_plan_sha256=COMPILED_PLAN_SHA, circuit_sha256=snapshot['resources']['circuit_sha256'],
         decoder_parameters=snapshot['parameters'], progress=snapshot['progress'], completed_results=snapshot['results'],
         metric='Any declared Observable mismatch; nonconvergence counted separately.',
@@ -209,6 +217,7 @@ def save_notebook_outputs(path, outputs, snapshot, expected_guard):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, required=True)
+    parser.add_argument('--midpoint-run-dir', type=Path)
     parser.add_argument('--notebooks', type=Path, nargs='+', required=True)
     parser.add_argument('--watch', action='store_true')
     parser.add_argument('--refresh-seconds', type=float, default=60)
@@ -218,7 +227,8 @@ def main():
     import fcntl
     import nbformat
     run = args.run_dir.resolve()
-    output = run / 'notebook_integration'
+    midpoint_run = args.midpoint_run_dir.resolve() if args.midpoint_run_dir else None
+    output = (midpoint_run or run) / 'notebook_integration'
     output.mkdir(exist_ok=True)
     with (output / '.watcher.lock').open('a+') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -227,7 +237,8 @@ def main():
         identity_path = output / 'watcher_identity.json'
         identity = dict(notebook_source_guards=guards, renderer_sha256=digest(Path(__file__).read_bytes()),
                         reader_sha256=digest(Path(__file__).with_name('bb_ppm_large_run.py').read_bytes()),
-                        campaign_plan_sha256=EXPECTED_PLAN_SHA256)
+                        campaign_plan_sha256s=[expected_plan_sha(path) for path in
+                            ([run, midpoint_run] if midpoint_run else [run])])
         if identity_path.exists():
             if json.loads(identity_path.read_text()) != identity:
                 raise RuntimeError('Notebook or renderer changed; review the new version before replacing watcher identity.')
@@ -235,7 +246,7 @@ def main():
             json_write(identity_path, identity)
         try:
             while True:
-                snapshot = read_run_snapshot(run)
+                snapshot = read_run_snapshot(run, midpoint_run=midpoint_run)
                 outputs, png = render_outputs(snapshot)
                 for path in paths:
                     save_notebook_outputs(path, outputs, snapshot, guards[str(path)])
@@ -244,7 +255,7 @@ def main():
                     temp = output / 'ler.png.tmp'
                     temp.write_bytes(png)
                     os.replace(temp, output / 'ler.png')
-                complete = len(snapshot['results']) == 2
+                complete = len(snapshot['results']) == len(snapshot['progress'])
                 json_write(output / 'watcher_status.json', dict(
                     status='complete' if complete else 'watching' if args.watch else 'snapshot_saved',
                     updated_utc=utc(), pid=os.getpid(), completed_noise_points=len(snapshot['results']),

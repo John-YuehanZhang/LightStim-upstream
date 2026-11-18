@@ -20,6 +20,7 @@
 | 噪声模型 | LightStim 原有 `circuit_level_with_idling` |
 | 各噪声率 | `p_1q = p_2q = p_meas = p_reset = p_idle = p` |
 | `p = 0.0001` | 100,000 shots |
+| `p = 0.0005` | 10,000 shots（独立新增点） |
 | `p = 0.001` | 10,000 shots |
 | 解码并行上限 | 192 个 worker，每个 worker 1 个线程 |
 
@@ -91,7 +92,7 @@ venv/bin/python -u notebooks/LogicalOps/run_bb_ppm.py \
 Notebook 配置 cell 使用：
 
 ```python
-SHOTS_BY_P = {1e-4: 100000, 1e-3: 10000}
+SHOTS_BY_P = {1e-4: 100000, 5e-4: 10000, 1e-3: 10000}
 WORKER_PROCESSES = 192
 THREADS_PER_WORKER = 1
 RESUME_IF_STOPPED = True
@@ -102,6 +103,8 @@ RESUME_IF_STOPPED = True
 ```text
 <仓库父目录>/bb_ppm_results/full_circuit_tuning/large_sample_runs/20261117_frozen_192
 ```
+
+该目录保留已完成的 `p=0.0001` 和 `p=0.001` 原始结果。新增的 `p=0.0005` 单独保存在同级 `20261118_p0005_192` 目录，由 `MIDPOINT_SAMPLE_RUN` 配置；环境变量名为 `BB_PPM_MIDPOINT_SAMPLE_RUN`。两个 campaign 分别核验固定计划和样本，再在 Notebook 中按 p 排序展示；不重新采样或合并旧点的统计样本。
 
 在持有原运行文件的服务器上，可直接打开 Notebook 执行，或使用现有服务器入口：
 
@@ -140,6 +143,9 @@ bb_ppm_results/
         driver.log             持久任务日志
         p0001/                 100,000-shot 输入与结果
         p001/                  10,000-shot 输入与结果
+      20261118_p0005_192/
+        p0005/                 新增的 10,000-shot 输入与结果
+        notebook_integration/  三点结果表与图的保存输出
 ```
 
 这些运行文件位于 Git 仓库之外；移动实验时必须保留完整依赖与来源关系，不能只复制 Notebook 或某一张结果表。当前保存和刷新操作只发生在本地，不自动提交或上传 GitHub。
@@ -151,5 +157,7 @@ bb_ppm_results/
 LER 的失败判据保持不变：decoder 对电路声明的 `OBSERVABLE_INCLUDE` 有任意一个预测错误，该 shot 计一次逻辑失败，LER 等于失败数除以实际完成的 shots。PPM 输出的 `+1` 或 `-1` 本身都不是失败标签。
 
 逻辑失败和未收敛分别统计。未满足 syndrome 的纠正即使恰好猜对所有 observables，也不能称为有效纠正成功。最终统计需等待该噪声点的固定样本全部完成；零次失败也不能证明真实 LER 为零，应结合样本数与置信区间阅读。
+
+三个噪声点全部完成后，图中按 p 从小到大连接观测 LER，保留每点的精确 95% 二项置信区间。连线仅辅助阅读，不是拟合曲线；零错误点仍显示为零并保留非零上界。
 
 这里测量的是当前初始化、完整 `X2 Z7 X12` 操作序列与末态读出所检查的逻辑关联。原 LightStim 的物理调度、噪声实现和实验边界保持不变；它不是论文 Table 2 单条指令的 LER，也不声称精确复现论文结果。
