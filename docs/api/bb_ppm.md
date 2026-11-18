@@ -6,16 +6,20 @@ This protocol implements pure in-module Pauli product measurements (PPMs) in the
 `[[144, 12, 12]]` gross code. It uses the physical logical representatives from
 [Tour de gross](https://arxiv.org/abs/2506.03094), the shift construction, and the
 logical processing unit (LPU) measurement construction. Detector generation,
-logical observable export, noise injection, sampling, decoding, and failure
-accounting use the existing LightStim infrastructure.
+logical observable export, and noise injection use the existing LightStim
+infrastructure. The benchmark uses Stim sampling and the upstream Relay-BP
+detailed decoder API to retain independent convergence diagnostics.
 
 The demonstration is `notebooks/LogicalOps/bb_ppm.ipynb`. After a setup cell,
 its five numbered cells export the 15 basic constructions, inspect 36 shifts
 and 540 native measurements, inspect 245 rotation axes, display a selected
-compilation path, and run that exact plan through the existing LER pipeline.
+compilation path, and display recorded LER results or run that exact plan through
+the BB PPM benchmark.
 The default target is `X2 Z7 X12`: one rotation transforms it to `+Y7`, with
 direct central measurement `Y7` and 13 logical operation records overall.
-No separate benchmark runner or LER estimator is introduced.
+The runnable benchmark is `benchmarks/logical_ops/run_bb_ppm.py`; its result
+reader and plotter are in `benchmarks/logical_ops/plot_bb_ppm.py`. The notebook
+uses those same functions and does not contain a second sampling implementation.
 
 ## Scope and logical indices
 
@@ -135,8 +139,7 @@ raw = clean.compile_sampler(seed=1).sample(32)
 result_bits = experiment.ppm_outcomes[0].evaluate(raw)
 ```
 
-A random PPM result of -1 is not a logical failure. LER uses the existing
-pipeline's comparison of decoder predictions with the circuit's automatic
+A random PPM result of -1 is not a logical failure. LER compares decoder predictions with the circuit's automatic
 observable flips. With default settings, any incorrectly predicted observable
 counts that shot as one failure. There is no postselection in this demo.
 
@@ -234,7 +237,7 @@ group. No synthetic multiqubit measurement is assumed to implement an axis.
 ## Construction and compilation reports
 
 The notebook writes generated artifacts under
-`notebooks/LogicalOps/assets/bb_ppm/`. The library exposes:
+`benchmarks/logical_ops/results/bb_ppm_reports/`. The library exposes:
 
 ```python
 from lightstim.qec_code.BB_code.ppm.native_reporting import export_basic_measurements
@@ -287,96 +290,60 @@ direct native measurements and identity plans have no search rounds.
 excluded from the notebook's executable-plan hash, so recording a search does
 not change the identity of its operations.
 
-The LER cell saves each completed noise point through the existing pipeline,
-plus its clean/noisy circuits, plan/circuit hashes, runtime configuration,
-source hashes, and PNG figure. Matching results can be reused only when the
-configuration fingerprint agrees. Increase the small demonstration budget for
-precise low-error-rate estimates. Stim circuits are saved via UTF-8 Python
-file I/O so Windows paths containing non-ASCII characters work.
+## Sampling, decoding, and plotting
 
-## Reusing the sampling and plotting pipeline
-
-A clean circuit can be reused for multiple physical error rates. The configured
-rates apply to noisy physical operations and idle moments. With
-`noiseless_boundaries=True`, the initial preparation/extraction and final
-QEC/readout boundary are excluded from noise injection. Ideal record-controlled
-Pauli-frame corrections are also kept noiseless; setting the five noise rates
-to `p` does not override these exclusions.
+The notebook defaults to a read-only display of the bundled reference counts.
+To run a new experiment, set `RUN_SAMPLING = True`, select a new run directory,
+and call the same benchmark function used by the CLI:
 
 ```python
-from lightstim.noise.config import NoiseConfig
-from lightstim.simulation.decoder_backend import SimulationPipeline, DecoderConfig
-from lightstim.plot.config import PlotConfig
-from lightstim.plot.plotter import plot_custom
-from lightstim.plot.utils import add_error_bars
-from IPython.display import display
-from IPython.utils.io import capture_output
-import matplotlib.pyplot as plt
+from benchmarks.logical_ops.bb_ppm_runner import run_campaign
+from benchmarks.logical_ops.plot_bb_ppm import display_results
 
-tasks = []
-for p in (0.001, 0.002, 0.003):
-    noise = NoiseConfig(p_1q=p, p_2q=p, p_meas=p, p_reset=p, p_idle=p)
-    noisy = experiment.builder.build_noisy_circuit(
-        noise, "circuit_level_with_idling", circuit=clean,
-    )
-    tasks.append((noisy, {"p": p, "sequence": "X2 (shifted)"}))
-
-pipeline = SimulationPipeline(
-    decoder_config=DecoderConfig(
-        "relay-bp", params={
-            "alpha": 1.0, "gamma0": 0.125,
-            "pre_iter": 80, "num_sets": 600, "set_max_iter": 60,
-            "gamma_dist_interval": (-0.24, 0.66), "stop_nconv": 5,
-            "stopping_criterion": "nconv", "parallel": True}),
-    max_shots=2_000, max_errors=50, batch_size=100,
-    num_workers=1, print_progress=False,
+run_campaign(
+    sequence=ppm_sequence, plans=plans,
+    p_values=(1e-4, 5e-4, 1e-3), shots=(100_000, 10_000, 10_000),
+    workers=192, run_dir="benchmarks/logical_ops/results/my_bb_ppm",
+    output="benchmarks/logical_ops/results/my_bb_ppm/results.csv",
 )
-results = pipeline.run_batch(tasks)
-display(results[["sequence", "p", "shots", "errors", "logical_error_rate"]])
-plot_data = add_error_bars(results)
-plot_positive = plot_data[plot_data["logical_error_rate"] > 0]
-with capture_output():
-    fig = plot_custom(plot_positive, PlotConfig(
-        x="p", y="logical_error_rate", hue="sequence",
-        palette={"X2 (shifted)": "#2a788e"},
-        x_label="Physical error rate (p)", y_label="Logical error rate (LER)",
-        title="Gross-code in-module PPM",
-    ))
-fig.axes[0].errorbar(
-    plot_positive["p"], plot_positive["logical_error_rate"],
-    yerr=plot_positive["logical_error_rate_err"], fmt="none",
-    color="#2a788e", capsize=3,
-)
-display(fig)
-plt.close(fig)
+display_results("benchmarks/logical_ops/results/my_bb_ppm/results.csv")
 ```
 
-Install the optional decoder into the selected environment with
-`python -m pip install "relay-bp[stim]"`. The demonstrated Windows environment
-uses Relay-BP 0.2.2; installation can build a local wheel. This is the existing
-registered backend, not an additional decoder implementation.
+The experiment reuses supplied plans, constructs a clean circuit through
+`BBPPMExperiment`, then injects the original `circuit_level_with_idling` noise
+with all five physical rates equal to p. Noiseless initial/final boundaries
+and ideal record-controlled Pauli feedback retain their existing exclusions.
+The strict detector error model is not decomposed into graphlike faults.
 
-These gross-code settings align with [Tour de gross Table 7](https://arxiv.org/html/2506.03094v1#A7.T7)
-and the explicit modern memory convention in [Relay-BP Section IV and Figure 2](https://arxiv.org/html/2506.01779v1#S4).
-The first leg uses 80 iterations and memory strength 0.125; up to 600 additional
-legs use 60 iterations each, stopping after 5 converged solutions. The min-sum
-multiplier is 1 and subsequent memory strengths are sampled from [-0.24, 0.66].
-Parameter alignment alone does not reproduce the paper's physical scheduling,
-benchmark boundary conditions, or finite-sampling results.
+The fixed-shot benchmark uses the upstream Relay-BP 0.2.2 detailed API with a
+fresh decoder per shot and one thread per worker. Its default parameters are
+`alpha=0.8`, `gamma0=0.5`, `pre_iter=320`, `num_sets=600`, `set_max_iter=60`,
+`gamma_dist_interval=(-0.1, 0.5)`, `stop_nconv=5`,
+`stopping_criterion="nconv"`, `logging=False`, and `seed=0`. These parameters
+were tuned on full-circuit training samples and frozen before independent
+validation; they are not the original paper's parameter profile.
 
-The existing `plot_custom` API uses human-readable `sequence` names in the
-legend and an explicit color per sequence. This avoids interpreting sequence
-identifiers as code distances. The overlay draws the error bars computed by
-LightStim's existing `add_error_bars`: a 95% normal approximation, which is only
-a rough uncertainty estimate at low error counts. Zero-error points remain in
-the results table and are omitted from the log-scale plot. No new
-confidence-interval or stopping-rule implementation is added.
+LER counts any mismatch between predicted and sampled automatic Observables.
+Syndrome consistency is independently checked using the returned correction
+and detector matrix. A nonconverged shot whose Observables match contributes
+to the nonconvergence count but not to the logical-failure count. No samples
+are discarded or replaced. This benchmark-specific detailed reporting does
+not change the generic `SimulationPipeline` or registered Relay-BP adapter.
 
-The notebook records the commit, package versions, noise model, syndrome rounds,
-decoder settings, shot budget, error budget, and runtime. The existing single-worker pipeline fixes the Stim sampler seed to 0.
-The notebook records this seed and whether the worktree has uncommitted changes;
-decoder-internal randomness and changes to software or circuits can still affect results. Zero observed errors at a finite shot count do not imply
-zero true LER; low-error-rate estimates require substantially larger samples.
+Each run retains sampled inputs, their hashes, configuration and source
+identity, and per-shot decoding checkpoints. A changed configuration cannot
+resume an existing run. Completed noise points are published to a CSV with a
+hash-bound manifest. The plotter validates the data and computes exact 95%
+Clopper–Pearson intervals; zero observed errors have a nonzero upper bound.
+
+The original 120,000-shot experiment is preserved as compact reference data
+in `benchmarks/logical_ops/reference/bb_ppm/`. Its manifest records historical
+source and input hashes. Raw samples and checkpoints are local archive data,
+not bundled with the demonstration. New runs use the documented benchmark
+seed policy and are not represented as continuations of that historical run.
+
+See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
+CLI configuration, checkpoint behavior, CSV fields, and plotting commands.
 
 ## Validation and limits of comparison with the paper
 
@@ -384,8 +351,8 @@ Logical tests check all 540 native measurement projectors using entangled
 reference states, the signed rotation gadget on every outcome branch, random
 multiqubit targets, noncommuting measurement sequences, and the order of inverse
 rotations. Physical construction tests check stabilizer commutation, the target
-product, gate collisions, and the actual measurement flows. The notebook checks
-that clean circuits have silent detector and observable samples.
+product, gate collisions, and the actual measurement flows. The benchmark checks
+that clean circuits have silent detector and observable samples before sampling.
 
 The simulation is a **baseline for this implementation**, not an exact numerical
 reproduction of the paper:
@@ -394,9 +361,9 @@ reproduction of the paper:
   optimized 12-timestep merged-round schedule; inspect actual layers/ticks.
 - The built-in LightStim depolarizing/readout channels are not identical to the
   paper's independent Pauli-fault probability expansion.
-- The notebook pins the displayed gross-code Relay-BP parameters to the paper
-  settings. This aligns the decoder configuration; it does not make the
-  physical circuit, noise channels, or failure event identical to the paper.
+- The notebook displays tuned full-circuit Relay-BP parameters. Neither these
+  settings nor the physical scheduling, noise channels, and failure event
+  establish numerical equivalence with the paper.
 - The demo compares whole PPM sequences with uniform logical preparation and
   automatically exported observables. Initialization and final QEC/readout
   boundaries are noiseless by default, following Appendix A.7. It does not
@@ -406,10 +373,9 @@ reproduction of the paper:
   the paper's circuit distance 10, an error threshold, or the low LER reported
   in Table 2. The static gross code's distance 12 is a separate property.
 
-## Running on a server
+## Running the demonstration or benchmark
 
-See the [server walkthrough](../../notebooks/LogicalOps/bb_ppm_README.md)
-for installation, bounded CPU threading, headless execution of this same
-notebook, generated outputs, and resuming completed noise points. The runner
-is `notebooks/LogicalOps/run_bb_ppm.py`; it uses the existing notebook and
-`SimulationPipeline`, with no separate sampler or decoder implementation.
+See the [notebook walkthrough](../../notebooks/LogicalOps/bb_ppm_README.md)
+for environment setup and in-place execution of the single demonstration.
+See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
+new runs with configurable worker counts and checkpoint recovery.

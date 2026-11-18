@@ -1,0 +1,341 @@
+"""Read, validate, and plot recorded BB PPM results without running experiments.
+
+The CSV contains completed fixed-size cohorts. Its adjacent JSON manifest binds
+the table to an experiment and records the provenance of the original archive.
+This module does not sample, decode, manage processes, or write Notebooks.
+Importing it changes neither thread settings nor plotting defaults.
+
+Run from the repository root with ``python -m benchmarks.logical_ops.plot_bb_ppm
+--input .../results.csv --output .../ler.png`` to export a figure.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+
+
+DEFAULT_RESULTS = Path(__file__).parent / "reference" / "bb_ppm" / "results.csv"
+COUNT_FIELDS = (
+    "shots", "logical_failures", "nonconverged", "converged_correct",
+    "converged_logical_failure", "unconverged_correct_observables",
+    "unconverged_logical_failure",
+)
+FLOAT_FIELDS = (
+    "p", "ler", "ler_95_exact_two_sided_low", "ler_95_exact_two_sided_high",
+    "ler_95_one_sided_upper", "nonconvergence_rate", "sum_decode_cpu_seconds",
+)
+HASH_FIELDS = ("source_manifest_sha256", "decoder_manifest_sha256")
+CSV_FIELDS = (
+    "p", *COUNT_FIELDS, "ler", "ler_95_exact_two_sided_low",
+    "ler_95_exact_two_sided_high", "ler_95_one_sided_upper",
+    "nonconvergence_rate", "sum_decode_cpu_seconds", *HASH_FIELDS,
+)
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, allow_nan=False)
+
+
+def _check_hash(value, label):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"Invalid SHA256: {label}.")
+
+
+def _budgets(values):
+    result = {}
+    for key, count in values.items():
+        p = float(key)
+        if not math.isfinite(p) or not 0 < p < 1 or p in result:
+            raise ValueError("Noise points must be unique probabilities between 0 and 1.")
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise ValueError("Requested shot counts must be positive integers.")
+        result[p] = count
+    if not result:
+        raise ValueError("At least one fixed shot budget is required.")
+    return result
+
+
+def _validate_rows(rows):
+    """Validate count identities and recompute exact fixed-N binomial intervals."""
+    from scipy.stats import beta
+
+    seen = set()
+    for row in rows:
+        for key in COUNT_FIELDS:
+            if type(row[key]) is not int or row[key] < 0:
+                raise ValueError(f"Invalid nonnegative count: {key}.")
+        for key in FLOAT_FIELDS:
+            if isinstance(row[key], bool) or not math.isfinite(row[key]):
+                raise ValueError(f"Invalid finite value: {key}.")
+        p, n, k = row["p"], row["shots"], row["logical_failures"]
+        if not 0 < p < 1 or p in seen or n <= 0 or k > n:
+            raise ValueError("Invalid or duplicate completed noise point.")
+        seen.add(p)
+        cc, cw, uc, uw = (row[key] for key in COUNT_FIELDS[3:])
+        if (cc + cw + uc + uw != n or cw + uw != k
+                or uc + uw != row["nonconverged"]):
+            raise ValueError("Logical-failure and convergence counts are inconsistent.")
+        expected = {
+            "ler": k / n,
+            "nonconvergence_rate": (uc + uw) / n,
+            "ler_95_exact_two_sided_low": 0.0 if k == 0 else beta.ppf(.025, k, n-k+1),
+            "ler_95_exact_two_sided_high": 1.0 if k == n else beta.ppf(.975, k+1, n-k),
+            "ler_95_one_sided_upper": 1.0 if k == n else beta.ppf(.95, k+1, n-k),
+        }
+        for key, value in expected.items():
+            if not 0 <= row[key] <= 1 or not math.isclose(
+                    row[key], value, rel_tol=1e-10, abs_tol=1e-14):
+                raise ValueError(f"Count-derived rate or exact confidence interval differs: {key}.")
+        if row["sum_decode_cpu_seconds"] < 0:
+            raise ValueError("Decode CPU time must be nonnegative.")
+        for key in HASH_FIELDS:
+            _check_hash(row[key], key)
+
+
+def read_results(results_path=DEFAULT_RESULTS, *, manifest_path=None,
+                 expected_plan_sha256=None, decoder_params=None, shots_by_p=None,
+                 expected_experiment=None):
+    """Return verified data; never read raw shots or execute an experiment.
+
+    ``results_path`` is a CSV or its manifest JSON. A CSV uses
+    ``<stem>.manifest.json`` when present, otherwise ``manifest.json`` beside it.
+    ``expected_plan_sha256`` is the *compiled circuit plan* hash, not a campaign
+    hash. ``expected_experiment`` may specify any subset of manifest experiment
+    fields, for example target, rounds, initial_state, final_basis, noise_model.
+    Partial runs expose only completed fixed-N points; expected shot budgets
+    are compared against all requested points in the manifest.
+    """
+    path = Path(results_path)
+    if path.suffix.lower() == ".json":
+        if manifest_path is not None:
+            raise ValueError("Specify the manifest only once.")
+        manifest_path, path = path, None
+    elif manifest_path is None:
+        sidecar = path.with_suffix(".manifest.json")
+        manifest_path = sidecar if sidecar.exists() else path.with_name("manifest.json")
+    manifest_path = Path(manifest_path)
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if (manifest.get("schema_version") != 1
+            or manifest.get("kind") != "bb_ppm_recorded_results"
+            or manifest.get("status") not in {"complete", "partial"}):
+        raise ValueError("Unsupported BB PPM result manifest.")
+    csv_info = manifest["results_csv"]
+    csv_name = csv_info["path"]
+    if not isinstance(csv_name, str) or Path(csv_name).name != csv_name:
+        raise ValueError("The manifest CSV must be a filename in the same directory.")
+    declared_path = manifest_path.parent / csv_name
+    if path is None:
+        path = declared_path
+    elif path.resolve() != declared_path.resolve():
+        raise ValueError("The requested CSV differs from the manifest CSV.")
+    csv_bytes = path.read_bytes()
+    _check_hash(csv_info["sha256"], "results_csv.sha256")
+    if _sha256(csv_bytes) != csv_info["sha256"]:
+        raise ValueError("Result CSV SHA256 differs from its manifest.")
+    reader = csv.DictReader(csv_bytes.decode("utf-8").splitlines())
+    if reader.fieldnames != list(CSV_FIELDS):
+        raise ValueError("Unexpected BB PPM CSV columns or column order.")
+    rows = []
+    for raw in reader:
+        row = dict(raw)
+        for key in COUNT_FIELDS:
+            if not re.fullmatch(r"\d+", row[key] or ""):
+                raise ValueError(f"Invalid integer CSV column: {key}.")
+            row[key] = int(row[key])
+        for key in FLOAT_FIELDS:
+            row[key] = float(row[key])
+        rows.append(row)
+    rows.sort(key=lambda row: row["p"])
+    _validate_rows(rows)
+    if rows != sorted(manifest["rows"], key=lambda row: row["p"]):
+        raise ValueError("CSV rows differ from the manifest's recorded statistics.")
+    experiment, decoder = manifest["experiment"], manifest["decoder"]
+    resources = manifest["resources"]
+    required = ("target", "compiled_plan_sha256", "clean_circuit_sha256",
+                "noise_model", "rounds", "initial_state", "final_basis")
+    if any(key not in experiment for key in required):
+        raise ValueError("The experiment identity is incomplete.")
+    if (decoder.get("name") != "relay-bp" or not isinstance(decoder.get("parameters"), dict)
+            or type(experiment["rounds"]) is not int or experiment["rounds"] <= 0):
+        raise ValueError("Invalid decoder or round-count identity.")
+    for key in ("target", "noise_model", "initial_state", "final_basis"):
+        if not isinstance(experiment[key], str) or not experiment[key]:
+            raise ValueError(f"Invalid experiment identity: {key}.")
+    for key in ("physical_qubits", "ticks", "detectors", "observables"):
+        if type(resources[key]) is not int or resources[key] < (0 if key in {"ticks", "detectors"} else 1):
+            raise ValueError(f"Invalid circuit resource: {key}.")
+    for key in ("compiled_plan_sha256", "clean_circuit_sha256"):
+        _check_hash(experiment[key], key)
+    if (resources["plan_sha256"] != experiment["compiled_plan_sha256"]
+            or resources["circuit_sha256"] != experiment["clean_circuit_sha256"]
+            or resources["sequence"] != experiment["target"]):
+        raise ValueError("Circuit resources differ from the experiment identity.")
+    if expected_plan_sha256 is not None and expected_plan_sha256 != experiment["compiled_plan_sha256"]:
+        raise ValueError("Saved results do not match the compiled circuit plan.")
+    if decoder_params is not None and _canonical(decoder_params) != _canonical(decoder["parameters"]):
+        raise ValueError("Decoder parameters differ from the recorded experiment.")
+    for key, value in (expected_experiment or {}).items():
+        if key not in experiment or _canonical(experiment[key]) != _canonical(value):
+            raise ValueError(f"Recorded experiment differs: {key}.")
+    requested = _budgets(manifest["requested_shots_by_p"])
+    completed = {row["p"]: row["shots"] for row in rows}
+    if any(requested.get(p) != n for p, n in completed.items()):
+        raise ValueError("A completed cohort differs from its fixed shot budget.")
+    if manifest["status"] == "complete" and completed != requested:
+        raise ValueError("Complete results are missing requested noise points.")
+    if shots_by_p is not None and _budgets(shots_by_p) != requested:
+        raise ValueError("Shot budgets differ from the recorded experiment.")
+    return {
+        "results": rows, "resources": resources, "parameters": decoder["parameters"],
+        "experiment": experiment, "status": manifest["status"],
+        "requested_shots_by_p": requested, "manifest": manifest,
+        "manifest_sha256": _sha256(manifest_bytes), "csv_sha256": _sha256(csv_bytes),
+    }
+
+
+def create_figure(data):
+    """Create a Figure with actual zero rates and exact 95% error bars.
+
+    Connecting lines guide the eye; they are not a fitted error-rate model.
+    A zero count remains at zero on a linear y axis, with a nonzero upper bound.
+    The one-sided 95% upper bound is reported separately in the display table.
+    """
+    import matplotlib as mpl
+    from matplotlib.figure import Figure
+    from lightstim.plot.styles import apply_paper_style, bold_ticks, CODES
+
+    rows = sorted(data["results"], key=lambda row: row["p"])
+    _validate_rows(rows)
+    if not rows:
+        raise ValueError("There are no completed fixed-N results to plot.")
+    with mpl.rc_context():
+        apply_paper_style()
+        figure = Figure(figsize=(8, 5.4), layout="constrained")
+        ax = figure.subplots()
+        ax.errorbar(
+            [row["p"] for row in rows], [row["ler"] for row in rows],
+            yerr=[[row["ler"]-row["ler_95_exact_two_sided_low"] for row in rows],
+                  [row["ler_95_exact_two_sided_high"]-row["ler"] for row in rows]],
+            fmt="o", color=CODES["bb_144_12_12"], capsize=5,
+            linestyle="-" if data["status"] == "complete" else "none")
+        upper = max(row["ler_95_exact_two_sided_high"] for row in rows)
+        ax.set_ylim(-.08*upper, min(1.05, 1.25*upper))
+        ax.set_xscale("log")
+        points = sorted(data["requested_shots_by_p"])
+        ax.set_xlim(min(points)*.6, max(points)*1.7)
+        ax.set_xticks(points, labels=[f"{p:g}" for p in points])
+        ax.set_xlabel("Physical error probability p", fontsize=13)
+        ax.set_ylabel("Logical error rate of the full circuit", fontsize=13)
+        ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 2))
+        ax.set_title(f"Full-circuit PPM: {data['experiment']['target']}\n"
+                     "Relay-BP; exact 95% binomial intervals", fontsize=14)
+        ax.grid(alpha=.25)
+        for row in rows:
+            ax.annotate(f"{row['logical_failures']:,}/{row['shots']:,}",
+                        (row["p"], row["ler"]), xytext=(8, 9),
+                        textcoords="offset points", fontsize=10)
+        bold_ticks(ax)
+    return figure
+
+
+def result_table(data):
+    """Return the compact English display table; retain full counts in data."""
+    import pandas as pd
+
+    def rate(row):
+        value = row["ler"]
+        lower, upper = row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]
+        return f"{value:.4g} (+{upper-value:.3g} / -{value-lower:.3g})"
+
+    return pd.DataFrame([{
+        "p": row["p"], "Shots": row["shots"], "Failures": row["logical_failures"],
+        "LER (95% CI)": rate(row), "Nonconverged": row["nonconverged"],
+        "Valid & correct": row["converged_correct"],
+        "95% one-sided upper bound": f"{row['ler_95_one_sided_upper']:.4g}",
+    } for row in data["results"]])
+
+
+def display_results(results_path=DEFAULT_RESULTS, *, expected_plan_sha256=None,
+                    decoder_params=None, shots_by_p=None, expected_experiment=None,
+                    manifest_path=None):
+    """Read and display recorded results in a Notebook, returning verified data."""
+    import io
+
+    import pandas as pd
+    from IPython.display import HTML, Image, display
+
+    data = read_results(results_path, manifest_path=manifest_path,
+                        expected_plan_sha256=expected_plan_sha256,
+                        decoder_params=decoder_params, shots_by_p=shots_by_p,
+                        expected_experiment=expected_experiment)
+    resources, experiment = data["resources"], data["experiment"]
+    resource_rows = [("Target", experiment["target"])] + [
+        (key.replace("_", " ").capitalize(), resources[key])
+        for key in ("physical_qubits", "ticks", "detectors", "observables")
+    ] + [("Noise model", experiment["noise_model"]), ("Rounds", experiment["rounds"]),
+         ("Initial / final basis", f"{experiment['initial_state']} / {experiment['final_basis']}")]
+    for key in ("measurement_instructions", "shift_instructions"):
+        if key in experiment:
+            resource_rows.append((key.replace("_", " ").capitalize(), experiment[key]))
+    if "p0_silent" in resources:
+        resource_rows.append(("Noiseless circuit silent", resources["p0_silent"]))
+    execution = data["manifest"].get("execution", {})
+    for key in ("worker_processes", "threads_per_worker"):
+        if key in execution:
+            resource_rows.append((f"Recorded {key.replace('_', ' ')}", execution[key]))
+    resource_rows.extend([
+        ("Compiled plan SHA256", experiment["compiled_plan_sha256"]),
+        ("Clean circuit SHA256", experiment["clean_circuit_sha256"]),
+    ])
+    for index, campaign in enumerate(data["manifest"].get("campaigns", []), 1):
+        resource_rows.append((f"Original campaign {index} plan SHA256", campaign["sha256"]))
+    display(pd.DataFrame(resource_rows, columns=["Property", "Recorded value"]))
+    display(HTML("<hr>"))
+    display(pd.DataFrame([{"Parameter": key, "Value": str(value)}
+                          for key, value in data["parameters"].items()]))
+    print("LER counts any declared LightStim Observable mismatch; nonconvergence is separate.")
+    if data["results"]:
+        display(result_table(data))
+        figure = create_figure(data)
+        buffer = io.BytesIO()
+        figure.savefig(buffer, format="png", dpi=160)
+        display(Image(data=buffer.getvalue(), format="png", width=800, height=540))
+    else:
+        print("No fixed-N noise point has completed.")
+    if any(row["logical_failures"] == 0 for row in data["results"]):
+        print("Zero observed failures are plotted at 0 with a nonzero confidence bound; they do not establish zero true LER.")
+    print("Only completed fixed-N cohorts are shown. Connecting lines guide the eye.")
+    if not data["manifest"].get("raw_shots_in_repository", False):
+        print("Recorded aggregate results reproduce this table and figure; the original raw-shot archive is not included here.")
+    return data
+
+
+def main(argv=None):
+    import os
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    results_dir = Path(__file__).parent / "results"
+    parser.add_argument("--input", type=Path, default=results_dir / "bb_ppm_results.csv")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--output", type=Path, default=results_dir / "fig_bb_ppm.png")
+    args = parser.parse_args(argv)
+    data = read_results(args.input, manifest_path=args.manifest)
+    figure = create_figure(data)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(args.output, dpi=160)
+    print(result_table(data).to_string(index=False))
+    print(f"Saved: {Path(os.path.relpath(args.output, Path.cwd())).as_posix()}")
+
+
+if __name__ == "__main__":
+    main()

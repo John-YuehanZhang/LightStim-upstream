@@ -107,6 +107,11 @@ low-error points are not benchmark data.
 
 ## Related benchmarks
 
+For gross-code in-module Pauli product measurements with Relay-BP, see
+[the BB PPM benchmark](README_bb_ppm.md). It provides a fixed-shot runner,
+per-shot checkpoints, a separate plotter, and portable recorded results used
+by the single BB PPM demonstration notebook.
+
 For state injection benchmarks (Z/X/Y state injection into the unrotated surface code),
 see [`benchmarks/state_injection/`](../state_injection/README.md).
 

@@ -71,6 +71,10 @@ Thumbs.db
 
 # Local simulation outputs (not pushed; archived separately)
 benchmarks/*/results/
+# Compact, immutable BB PPM reference counts and provenance (not raw shots).
+!benchmarks/logical_ops/reference/bb_ppm/results.csv
+!benchmarks/logical_ops/reference/bb_ppm/manifest.json
+!benchmarks/logical_ops/reference/bb_ppm/manifest.schema.json
 playground/subsystem/
 playground/subsystem_artifacts/
 notebooks/Memory/assets/

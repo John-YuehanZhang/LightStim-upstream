@@ -1,0 +1,502 @@
+{
+  "$schema": "manifest.schema.json",
+  "schema_version": 1,
+  "kind": "bb_ppm_recorded_results",
+  "status": "complete",
+  "results_csv": {
+    "path": "results.csv",
+    "sha256": "9581fba4254352aeafabd04f414dcf9c9e015299f5dce0fb7030550c489dfe00"
+  },
+  "requested_shots_by_p": {
+    "0.0001": 100000,
+    "0.0005": 10000,
+    "0.001": 10000
+  },
+  "rows": [
+    {
+      "p": 0.0001,
+      "shots": 100000,
+      "logical_failures": 0,
+      "nonconverged": 4,
+      "converged_correct": 99996,
+      "converged_logical_failure": 0,
+      "unconverged_correct_observables": 4,
+      "unconverged_logical_failure": 0,
+      "ler": 0.0,
+      "ler_95_exact_two_sided_low": 0.0,
+      "ler_95_exact_two_sided_high": 3.68881141579242e-05,
+      "ler_95_one_sided_upper": 2.9956874019427947e-05,
+      "nonconvergence_rate": 4e-05,
+      "sum_decode_cpu_seconds": 1414248.72972064,
+      "source_manifest_sha256": "984b6e5a8334471497dafc8e75c3be2724857a42a199fbea5e587897e6aaa8da",
+      "decoder_manifest_sha256": "df55914da54ced3c7db4691b9b2af66e0e4957d45e17e303cf625a330f7298b8"
+    },
+    {
+      "p": 0.0005,
+      "shots": 10000,
+      "logical_failures": 2,
+      "nonconverged": 6,
+      "converged_correct": 9994,
+      "converged_logical_failure": 0,
+      "unconverged_correct_observables": 4,
+      "unconverged_logical_failure": 2,
+      "ler": 0.0002,
+      "ler_95_exact_two_sided_low": 2.422184564042985e-05,
+      "ler_95_exact_two_sided_high": 0.0007222800577237158,
+      "ler_95_one_sided_upper": 0.0006294441486871455,
+      "nonconvergence_rate": 0.0006,
+      "sum_decode_cpu_seconds": 795930.65894508,
+      "source_manifest_sha256": "165b8a4d4316eb3cf3571e08f2b5147622b698897645d8efb645f72981307812",
+      "decoder_manifest_sha256": "5fc10bde4c9a2b01455a831e4de2f6dc4eda9726f4d2f9f944a9689f5ea0b2a2"
+    },
+    {
+      "p": 0.001,
+      "shots": 10000,
+      "logical_failures": 8,
+      "nonconverged": 72,
+      "converged_correct": 9928,
+      "converged_logical_failure": 0,
+      "unconverged_correct_observables": 64,
+      "unconverged_logical_failure": 8,
+      "ler": 0.0008,
+      "ler_95_exact_two_sided_low": 0.00034544447699631385,
+      "ler_95_exact_two_sided_high": 0.0015757071053656823,
+      "ler_95_one_sided_upper": 0.0014430005782821718,
+      "nonconvergence_rate": 0.0072,
+      "sum_decode_cpu_seconds": 5350822.150855375,
+      "source_manifest_sha256": "0a7778860911e9345d2070efcb199757d55aa8a492f21812d7e64fd164ee9bc1",
+      "decoder_manifest_sha256": "b5b02f65c5bb79cc7d69c8fc7f32d10ff316b653af3b527eb8614dc12395c99e"
+    }
+  ],
+  "experiment": {
+    "target": "X2 Z7 X12",
+    "compiled_plan_sha256": "f028b3134db48c3f0f7a6c5b9ae97ddcd7c95cffcb59f8cfc0afc28ad1679a37",
+    "clean_circuit_sha256": "12ebce837acec62f66c7c07d513d28f7fb293ba2dea6ee819869be9402aebc87",
+    "noise_model": "circuit_level_with_idling",
+    "noise_implementation": "Original unmodified LightStim circuit_level_with_idling; no classical-readout correction or equal-q conversion.",
+    "rounds": 10,
+    "initial_state": "X",
+    "final_basis": "X",
+    "ideal_initial_final_boundaries": true,
+    "measurement_instructions": 7,
+    "shift_instructions": 4,
+    "metric": "Any mismatch among the 10 declared automatic LightStim Observables per full circuit.",
+    "nonconvergence_metric": "Returned correction violates Hc=s; counted separately from observable mismatch.",
+    "scope": "X-initialized, X-readout full sequence; not raw PPM outcome LER or the paper 23-Bell-observable single-instruction benchmark."
+  },
+  "decoder": {
+    "name": "relay-bp",
+    "version": "0.2.2",
+    "parameters": {
+      "alpha": 0.8,
+      "gamma0": 0.5,
+      "pre_iter": 320,
+      "num_sets": 600,
+      "set_max_iter": 60,
+      "gamma_dist_interval": [
+        -0.1,
+        0.5
+      ],
+      "stop_nconv": 5,
+      "stopping_criterion": "nconv",
+      "logging": false,
+      "seed": 0
+    },
+    "selection": {
+      "archive_path": "full_circuit_tuning/original_lightstim/selection.json",
+      "sha256": "508392498c37d4a018422c9e0ca57824503a59118cd21f8748c792541977b654"
+    },
+    "selection_frozen_utc": "2026-11-17T02:03:14.028406+00:00",
+    "selection_scope": "Training-only staged search; shortlist selected at pre320/16, then assessed at the predeclared full600 budget. No global optimality claim.",
+    "validation_results_used_for_selection": false
+  },
+  "resources": {
+    "sequence": "X2 Z7 X12",
+    "physical_qubits": 378,
+    "ticks": 1115,
+    "detectors": 15510,
+    "observables": 10,
+    "p0_silent": true,
+    "plan_sha256": "f028b3134db48c3f0f7a6c5b9ae97ddcd7c95cffcb59f8cfc0afc28ad1679a37",
+    "circuit_sha256": "12ebce837acec62f66c7c07d513d28f7fb293ba2dea6ee819869be9402aebc87",
+    "source": "Saved original clean-circuit resource report; not current runtime or worker settings.",
+    "source_sha256": "a49b43d183e61c3bb7247c2f2cf841d25ca3e8483f3fa6bb8d4a11198b9ec3b0"
+  },
+  "execution": {
+    "worker_processes": 192,
+    "threads_per_worker": 1,
+    "scope": "Recorded execution resources; plotting does not launch workers."
+  },
+  "sample_policy": {
+    "fixed_N_per_point": true,
+    "batch_size": 1000,
+    "independent_streams": true,
+    "training_or_prior_holdout_rows_reused": false,
+    "filtering": false,
+    "result_based_stopping": false,
+    "retuning": false
+  },
+  "confidence_intervals": {
+    "method": "Clopper-Pearson exact binomial",
+    "confidence_level": 0.95,
+    "two_sided_tail_probability": 0.025,
+    "one_sided_tail_probability": 0.05,
+    "scope": "Fixed-N pointwise intervals; not simultaneous or anytime-valid intervals.",
+    "zero_count_display": "Empirical rate at zero on a linear y axis with its nonzero two-sided upper bound; one-sided upper bound in table."
+  },
+  "points": [
+    {
+      "p": 0.0001,
+      "shots": 100000,
+      "campaign": "20261117_frozen_192",
+      "case": "p0001",
+      "campaign_plan": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/plan.json",
+        "sha256": "755d91b0d8e3b41235e0f88139be5037ab3c1de263e629d7c83a011e13377515"
+      },
+      "campaign_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/summary.json",
+        "sha256": "4a9fc46a4087c540f0ac9cbeb03038cb22b84c5d6d2df36ec36dd5bb24ab1bd9"
+      },
+      "source_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p0001/merged/manifest.json",
+        "sha256": "984b6e5a8334471497dafc8e75c3be2724857a42a199fbea5e587897e6aaa8da"
+      },
+      "decoder_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p0001/decoding/manifest.json",
+        "sha256": "df55914da54ced3c7db4691b9b2af66e0e4957d45e17e303cf625a330f7298b8"
+      },
+      "candidate_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p0001/decoding/candidates/selected/summary.json",
+        "sha256": "b58582f14ad247b5844fca3c26799d5d7f2584073415f17cb94aae4b8165639b"
+      },
+      "noisy_circuit": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p0001/merged/circuit.stim",
+        "sha256": "ce21046bda412d9bf61f26c1688f55d163849ee200d250fd22ab3bc1cfc77ad3"
+      },
+      "input_artifact_sha256s": {
+        "check_matrix.npz": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "observable_matrix.npz": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "error_priors.npy": "cc9a897d63505c0f5f96f400374f50c938e9dbcfe3f13e30fe8b307dca7c6054",
+        "samples.npz": "4541e0b2ce7ed0bfdf787a20f0cec060b2c3422846e15639ffc9b6640815ee2d"
+      },
+      "matrix_summary": {
+        "H_shape": [
+          15510,
+          564064
+        ],
+        "O_shape": [
+          10,
+          564064
+        ],
+        "H_nnz": 4329031,
+        "O_nnz": 822559,
+        "prior_min": 6.666977798497342e-06,
+        "prior_max": 0.0014646233574326618,
+        "syndrome_bias_active": false,
+        "observable_bias_active": false,
+        "H_sha256": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "O_sha256": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "priors_sha256": "cc9a897d63505c0f5f96f400374f50c938e9dbcfe3f13e30fe8b307dca7c6054",
+        "same_detector_different_observable_collisions": 0,
+        "all_matrix_columns_and_priors_independently_matched_to_dem": true
+      },
+      "sampler_seeds_by_batch": [
+        87020839223951360,
+        87020839223951361,
+        87020839223951362,
+        87020839223951363,
+        87020839223951364,
+        87020839223951365,
+        87020839223951366,
+        87020839223951367,
+        87020839223951368,
+        87020839223951369,
+        87020839223951370,
+        87020839223951371,
+        87020839223951372,
+        87020839223951373,
+        87020839223951374,
+        87020839223951375,
+        87020839223951376,
+        87020839223951377,
+        87020839223951378,
+        87020839223951379,
+        87020839223951380,
+        87020839223951381,
+        87020839223951382,
+        87020839223951383,
+        87020839223951384,
+        87020839223951385,
+        87020839223951386,
+        87020839223951387,
+        87020839223951388,
+        87020839223951389,
+        87020839223951390,
+        87020839223951391,
+        87020839223951392,
+        87020839223951393,
+        87020839223951394,
+        87020839223951395,
+        87020839223951396,
+        87020839223951397,
+        87020839223951398,
+        87020839223951399,
+        87020839223951400,
+        87020839223951401,
+        87020839223951402,
+        87020839223951403,
+        87020839223951404,
+        87020839223951405,
+        87020839223951406,
+        87020839223951407,
+        87020839223951408,
+        87020839223951409,
+        87020839223951410,
+        87020839223951411,
+        87020839223951412,
+        87020839223951413,
+        87020839223951414,
+        87020839223951415,
+        87020839223951416,
+        87020839223951417,
+        87020839223951418,
+        87020839223951419,
+        87020839223951420,
+        87020839223951421,
+        87020839223951422,
+        87020839223951423,
+        87020839223951424,
+        87020839223951425,
+        87020839223951426,
+        87020839223951427,
+        87020839223951428,
+        87020839223951429,
+        87020839223951430,
+        87020839223951431,
+        87020839223951432,
+        87020839223951433,
+        87020839223951434,
+        87020839223951435,
+        87020839223951436,
+        87020839223951437,
+        87020839223951438,
+        87020839223951439,
+        87020839223951440,
+        87020839223951441,
+        87020839223951442,
+        87020839223951443,
+        87020839223951444,
+        87020839223951445,
+        87020839223951446,
+        87020839223951447,
+        87020839223951448,
+        87020839223951449,
+        87020839223951450,
+        87020839223951451,
+        87020839223951452,
+        87020839223951453,
+        87020839223951454,
+        87020839223951455,
+        87020839223951456,
+        87020839223951457,
+        87020839223951458,
+        87020839223951459
+      ],
+      "batch_mapping_sha256": "730bda63fd869f0f51a2f41a6930c81bb6be0eae7b36723669bea571ed1e8a5d",
+      "merge_audit_sha256": "e3e44f5d3dc4e71788df4d2a49bc4a58401ade95ff1477d3791a1e300d821a26",
+      "versions": {
+        "stim": "1.16.0",
+        "relay-bp": "0.2.2",
+        "numpy": "2.2.6",
+        "scipy": "1.18.1"
+      },
+      "decoder_config_fingerprint": "0d8eb1eb2ff255ee2519f2e4a236f9f60bf89a0eb2956d5f3c124c513bc10f99",
+      "started_utc": "2026-11-17T07:02:04.410513+00:00",
+      "updated_utc": "2026-11-17T10:14:32.517710+00:00",
+      "posterior_nonfinite_shots": 0,
+      "total_bp_iterations": 10732948,
+      "sum_decode_seconds": 1697152.19337701,
+      "all_returned_Hc_Oc_and_convergence_independently_verified": true
+    },
+    {
+      "p": 0.0005,
+      "shots": 10000,
+      "campaign": "20261118_p0005_192",
+      "case": "p0005",
+      "campaign_plan": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/plan.json",
+        "sha256": "b455e9d1810fa6251d02aacd90edeafd47e7124e990b609e7faa006838cc04f1"
+      },
+      "campaign_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/summary.json",
+        "sha256": "7d7b6c53571c1720b98f9a93dab06ab697341513c144a83b457b87b36523de5e"
+      },
+      "source_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/p0005/merged/manifest.json",
+        "sha256": "165b8a4d4316eb3cf3571e08f2b5147622b698897645d8efb645f72981307812"
+      },
+      "decoder_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/p0005/decoding/manifest.json",
+        "sha256": "5fc10bde4c9a2b01455a831e4de2f6dc4eda9726f4d2f9f944a9689f5ea0b2a2"
+      },
+      "candidate_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/p0005/decoding/candidates/selected/summary.json",
+        "sha256": "48e019eb222db74c30caa6849b01a5167527af687d68f6cca13f17263b93fc0c"
+      },
+      "noisy_circuit": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/p0005/merged/circuit.stim",
+        "sha256": "ccb7239e007276f89d28047aed72b20692d998f041b772f2c112765e405de2ba"
+      },
+      "input_artifact_sha256s": {
+        "check_matrix.npz": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "observable_matrix.npz": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "error_priors.npy": "3f0152d0ffdb4d1d4379e98934dd28c46553e6db0ba53dffd9314f344c19ff84",
+        "samples.npz": "b7a792098fe013a662cabfca772c3c42db232fae89dd0f95a75c00cee808a77f"
+      },
+      "matrix_summary": {
+        "H_shape": [
+          15510,
+          564064
+        ],
+        "O_shape": [
+          10,
+          564064
+        ],
+        "H_nnz": 4329031,
+        "O_nnz": 822559,
+        "prior_min": 3.334111370467685e-05,
+        "prior_max": 0.0072824302280503185,
+        "syndrome_bias_active": false,
+        "observable_bias_active": false,
+        "H_sha256": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "O_sha256": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "priors_sha256": "3f0152d0ffdb4d1d4379e98934dd28c46553e6db0ba53dffd9314f344c19ff84"
+      },
+      "sampler_seeds_by_batch": [
+        87020839240728576,
+        87020839240728577,
+        87020839240728578,
+        87020839240728579,
+        87020839240728580,
+        87020839240728581,
+        87020839240728582,
+        87020839240728583,
+        87020839240728584,
+        87020839240728585
+      ],
+      "batch_mapping_sha256": "c0951860a2ce90b9685c1ced61e41e04533b06c6ea0a126b483d0c81ae5e1e6b",
+      "merge_audit_sha256": "6af87f6f6ba443445f9d098aaf00524077905515188902208a59aa690ad0a5d6",
+      "versions": {
+        "stim": "1.16.0",
+        "relay-bp": "0.2.2",
+        "numpy": "2.2.6",
+        "scipy": "1.18.1"
+      },
+      "decoder_config_fingerprint": "3d8a6c124956a0db6f9b1c84f3cd32a63f2db064c549f878bd54b9b739e15f2a",
+      "started_utc": "2026-11-18T02:05:25.196185+00:00",
+      "updated_utc": "2026-11-18T03:48:48.184577+00:00",
+      "posterior_nonfinite_shots": 0,
+      "total_bp_iterations": 5360041,
+      "sum_decode_seconds": 804433.1100324958,
+      "all_returned_Hc_Oc_and_convergence_independently_verified": true
+    },
+    {
+      "p": 0.001,
+      "shots": 10000,
+      "campaign": "20261117_frozen_192",
+      "case": "p001",
+      "campaign_plan": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/plan.json",
+        "sha256": "755d91b0d8e3b41235e0f88139be5037ab3c1de263e629d7c83a011e13377515"
+      },
+      "campaign_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/summary.json",
+        "sha256": "4a9fc46a4087c540f0ac9cbeb03038cb22b84c5d6d2df36ec36dd5bb24ab1bd9"
+      },
+      "source_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p001/merged/manifest.json",
+        "sha256": "0a7778860911e9345d2070efcb199757d55aa8a492f21812d7e64fd164ee9bc1"
+      },
+      "decoder_manifest": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p001/decoding/manifest.json",
+        "sha256": "b5b02f65c5bb79cc7d69c8fc7f32d10ff316b653af3b527eb8614dc12395c99e"
+      },
+      "candidate_summary": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p001/decoding/candidates/selected/summary.json",
+        "sha256": "379647473d4a0d954ed8ab681c43b1021bf0dfbd805df256023fb95693e514a6"
+      },
+      "noisy_circuit": {
+        "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/p001/merged/circuit.stim",
+        "sha256": "da18ef6d1689a2c9ac3091038be76c17e3deb713d1f4570d3867adc8e37092a2"
+      },
+      "input_artifact_sha256s": {
+        "check_matrix.npz": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "observable_matrix.npz": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "error_priors.npy": "d5ec1c1eda7f2a806565f9434f8612d8b63d40c7dbc639a8fdd90140dec294a2",
+        "samples.npz": "cd4e348ed5fee8ba15144b6d599316e6b853ca1464afec9ada4864a1a028d23f"
+      },
+      "matrix_summary": {
+        "H_shape": [
+          15510,
+          564064
+        ],
+        "O_shape": [
+          10,
+          564064
+        ],
+        "H_nnz": 4329031,
+        "O_nnz": 822559,
+        "prior_min": 6.669779853440971e-05,
+        "prior_max": 0.014463947337467184,
+        "syndrome_bias_active": false,
+        "observable_bias_active": false,
+        "H_sha256": "3002d05d6205c7250c8b0aced440305b3e784f87d8e96aef69f5ad34abb9f5da",
+        "O_sha256": "1903bfe11a6ff4449b1b72d496210e40941b674e23e916bd843a527df212cf3d",
+        "priors_sha256": "d5ec1c1eda7f2a806565f9434f8612d8b63d40c7dbc639a8fdd90140dec294a2"
+      },
+      "sampler_seeds_by_batch": [
+        87020839207174144,
+        87020839207174145,
+        87020839207174146,
+        87020839207174147,
+        87020839207174148,
+        87020839207174149,
+        87020839207174150,
+        87020839207174151,
+        87020839207174152,
+        87020839207174153
+      ],
+      "batch_mapping_sha256": "76928cbbb590ec13d87f68cfb6639867d9bd4e321bf362169472f37690eb2b6a",
+      "merge_audit_sha256": "28321781e3f6f3c6b8321426a113d86ad5631be5f0823080219d1b128dc9aa8c",
+      "versions": {
+        "stim": "1.16.0",
+        "relay-bp": "0.2.2",
+        "numpy": "2.2.6",
+        "scipy": "1.18.1"
+      },
+      "decoder_config_fingerprint": "daceab071738c0adc3e381dff16f0d8f17df3ad3639e5794b4aa7ac15ec0623a",
+      "started_utc": "2026-11-17T10:14:44.615120+00:00",
+      "updated_utc": "2026-11-17T19:01:46.078872+00:00",
+      "posterior_nonfinite_shots": 0,
+      "total_bp_iterations": 30205075,
+      "sum_decode_seconds": 5598445.487840076,
+      "all_returned_Hc_Oc_and_convergence_independently_verified": true
+    }
+  ],
+  "campaigns": [
+    {
+      "archive_path": "full_circuit_tuning/large_sample_runs/20261117_frozen_192/plan.json",
+      "sha256": "755d91b0d8e3b41235e0f88139be5037ab3c1de263e629d7c83a011e13377515"
+    },
+    {
+      "archive_path": "full_circuit_tuning/large_sample_runs/20261118_p0005_192/plan.json",
+      "sha256": "b455e9d1810fa6251d02aacd90edeafd47e7124e990b609e7faa006838cc04f1"
+    }
+  ],
+  "archive_reference_root": "Paths in archive_path are relative to the original bb_ppm_results archive; that archive is not bundled in this repository.",
+  "raw_shots_in_repository": false,
+  "reproduction_scope": "This compact recorded table and manifest reproduce aggregate tables, confidence intervals, and plots. Raw samples, correction/posterior checkpoints, and the full original execution archive are not included.",
+  "original_notebook_commit": "5cfb7df4b5200a71642bafa0e4ea20c7e5881ffc",
+  "recorded_through_utc": "2026-11-18T03:48:48.961039+00:00"
+}
