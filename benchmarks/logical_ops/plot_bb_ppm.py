@@ -249,20 +249,27 @@ def create_figure(data):
 
 
 def result_table(data):
-    """Return the compact English display table; retain full counts in data."""
+    """Return a display table using p's power of ten for each row's probabilities."""
     import pandas as pd
 
-    def rate(row):
-        value = row["ler"]
-        lower, upper = row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]
-        return f"{value:.4g} (+{upper-value:.3g} / -{value-lower:.3g})"
-
-    return pd.DataFrame([{
-        "p": row["p"], "Shots": row["shots"], "Failures": row["logical_failures"],
-        "LER (95% CI)": rate(row), "Nonconverged": row["nonconverged"],
-        "Valid & correct": row["converged_correct"],
-        "95% one-sided upper bound": f"{row['ler_95_one_sided_upper']:.4g}",
-    } for row in data["results"]])
+    superscripts = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
+    rows = []
+    for row in data["results"]:
+        exponent = math.floor(math.log10(row["p"]))
+        scale = 10.0 ** exponent
+        power = f" × 10{str(exponent).translate(superscripts)}"
+        value = row["ler"] / scale
+        lower = row["ler_95_exact_two_sided_low"] / scale
+        upper = row["ler_95_exact_two_sided_high"] / scale
+        rows.append({
+            "p": f"{row['p'] / scale:.4g}{power}",
+            "Shots": row["shots"], "Failures": row["logical_failures"],
+            "LER (95% CI)": f"[{value:.4g} (+{upper-value:.3g} / −{value-lower:.3g})]{power}",
+            "Nonconverged": row["nonconverged"],
+            "Valid & correct": row["converged_correct"],
+            "95% one-sided upper bound": f"{row['ler_95_one_sided_upper'] / scale:.4g}{power}",
+        })
+    return pd.DataFrame(rows)
 
 
 def display_results(results_path=DEFAULT_RESULTS, *, expected_plan_sha256=None,
@@ -305,7 +312,8 @@ def display_results(results_path=DEFAULT_RESULTS, *, expected_plan_sha256=None,
                           for key, value in data["parameters"].items()]))
     print("LER counts any declared LightStim Observable mismatch; nonconvergence is separate.")
     if data["results"]:
-        display(result_table(data))
+        with pd.option_context("display.max_columns", None):
+            display(result_table(data))
         figure = create_figure(data)
         buffer = io.BytesIO()
         figure.savefig(buffer, format="png", dpi=160)
