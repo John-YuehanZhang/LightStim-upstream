@@ -245,16 +245,23 @@ def _verify_inputs(source):
     return manifest, H, O, priors, detectors, observables
 
 
-def _prepare_point(clean, point, *, p, shots, seed, point_index, batch_size):
+def _prepare_point(clean, point, *, p, shots, seed, point_index, batch_size,
+                   noise_schedule=None):
     import numpy as np
     import scipy.sparse as sparse
     import stim
     from lightstim.noise.config import NoiseConfig
     from lightstim.noise.injector import NoiseInjector
+    from lightstim.qec_code.BB_code.ppm.frame import strip_frame_activity
     source = point / "inputs"
     source.mkdir(parents=True, exist_ok=True)
     config = NoiseConfig(p_1q=p, p_2q=p, p_meas=p, p_reset=p, p_idle=p)
-    noisy = NoiseInjector.from_circuit_level_with_idling(config, list(range(clean.num_qubits))).inject_noise(clean)
+    schedule = clean if noise_schedule is None else noise_schedule
+    _require(strip_frame_activity(schedule) == clean,
+             "Noise schedule differs from the clean BB circuit")
+    noisy = NoiseInjector.from_circuit_level_with_idling(
+        config, list(range(clean.num_qubits))).inject_noise(schedule)
+    noisy = strip_frame_activity(noisy)
     _require(noisy.without_noise() == clean, "Noise injection changed the clean circuit")
     _require(stim.Circuit(str(noisy)) == noisy, "Circuit text roundtrip changed a noise argument")
     circuit_bytes = str(noisy).encode("utf-8")
@@ -545,6 +552,7 @@ def _publish(output, campaign, rows, workers, points):
     os.replace(temporary, output)
     _atomic_json(manifest_path, dict(schema_version=1, kind="bb_ppm_recorded_results",
         status="complete" if len(rows) == len(campaign["identity"]["p_values"]) else "partial",
+        raw_shots_in_repository=False,
         campaign_identity=campaign["identity_sha256"], run_id=campaign["run_id"],
         results_csv=dict(path=output.name, sha256=_sha(output)),
         experiment=campaign["experiment"], resources=campaign["resources"],
@@ -569,6 +577,7 @@ def run_campaign(*, sequence=None, plans=None, p_values=DEFAULT_P_VALUES, shots=
     """
     import stim
     from lightstim.protocols.bb_ppm import BBPPMExperiment, BBPPMStep
+    from lightstim.qec_code.BB_code.ppm.lowering import Measure, Shift
     parameters = normalize_decoder_params(decoder_params)
     p_values = tuple(float(p) for p in p_values)
     counts = [shots] * len(p_values) if type(shots) is int else list(shots)
@@ -603,22 +612,32 @@ def run_campaign(*, sequence=None, plans=None, p_values=DEFAULT_P_VALUES, shots=
             _require(campaign["identity"] == identity and campaign["clean_sha256"] == _sha(run_dir / "clean.stim"),
                      "Saved clean circuit or campaign identity changed")
             clean = stim.Circuit.from_file(run_dir / "clean.stim")
+            _require(campaign["noise_schedule_sha256"] == _sha(run_dir / "noise_schedule.stim"),
+                     "Saved BB noise schedule changed")
+            noise_schedule = stim.Circuit.from_file(run_dir / "noise_schedule.stim")
         else:
             clean = experiment.build()
+            noise_schedule = experiment.noise_schedule
             _require(clean.num_observables > 0 and clean.detector_error_model().num_errors == 0,
                      "Clean BB PPM circuit has no evaluation observables or is not silent")
             _require(not clean.compile_detector_sampler(seed=0).sample(8, append_observables=True).any(),
                      "Noiseless detector/observable check failed")
             (run_dir / "clean.stim").write_bytes(str(clean).encode("utf-8"))
+            (run_dir / "noise_schedule.stim").write_bytes(str(noise_schedule).encode("utf-8"))
             _require(stim.Circuit.from_file(run_dir / "clean.stim") == clean, "Clean circuit roundtrip failed")
             clean_sha = _sha(run_dir / "clean.stim")
             label = "; ".join(" ".join(f"{letter}{q}" for q, letter in step.targets) for step in sequence)
             campaign = dict(identity=identity, identity_sha256=_fingerprint(identity), run_id=uuid.uuid4().hex,
-                clean_sha256=clean_sha, experiment=dict(target=label, compiled_plan_sha256=plan_sha,
+                clean_sha256=clean_sha, noise_schedule_sha256=_sha(run_dir / "noise_schedule.stim"),
+                experiment=dict(target=label, compiled_plan_sha256=plan_sha,
                     clean_circuit_sha256=clean_sha, noise_model=noise_model, rounds=rounds,
-                    initial_state=initial_states, final_basis=final_measure_states),
+                    initial_state=initial_states, final_basis=final_measure_states,
+                    measurement_instructions=sum(isinstance(op, Measure) for plan in experiment.plans
+                                                 for op in getattr(plan, "operations", ())),
+                    shift_instructions=sum(isinstance(op, Shift) for plan in experiment.plans
+                                           for op in getattr(plan, "operations", ()))),
                 resources=dict(sequence=label, physical_qubits=clean.num_qubits, ticks=clean.num_ticks,
-                    detectors=clean.num_detectors, observables=clean.num_observables,
+                    detectors=clean.num_detectors, observables=clean.num_observables, p0_silent=True,
                     plan_sha256=plan_sha, circuit_sha256=clean_sha))
             _atomic_json(campaign_path, campaign)
         _claim_output(output, campaign)
@@ -628,7 +647,8 @@ def run_campaign(*, sequence=None, plans=None, p_values=DEFAULT_P_VALUES, shots=
         for index, (p, n) in enumerate(zip(p_values, counts)):
             point = run_dir / f"point_{index:03d}"
             point.mkdir(exist_ok=True)
-            _prepare_point(clean, point, p=p, shots=n, seed=seed, point_index=index, batch_size=batch_size)
+            _prepare_point(clean, point, p=p, shots=n, seed=seed, point_index=index,
+                           batch_size=batch_size, noise_schedule=noise_schedule)
             decoded, complete, stopped = decode_saved_inputs(point / "inputs", point / "decoding",
                 decoder_params=parameters, workers=workers, print_progress=print_progress)
             if not complete:

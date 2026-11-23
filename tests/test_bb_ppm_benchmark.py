@@ -108,6 +108,10 @@ def toy_experiment(monkeypatch):
 
         def build(self):
             return stim.Circuit("R 0\nTICK\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]")
+
+        @property
+        def noise_schedule(self):
+            return self.build()
     monkeypatch.setattr("lightstim.protocols.bb_ppm.BBPPMExperiment", ToyExperiment)
     return ToyExperiment
 
@@ -142,6 +146,28 @@ def test_prepared_point_from_another_configuration_is_rejected(toy_experiment, t
         runner._prepare_point(clean, point, p=.002, shots=3, seed=41, point_index=0, batch_size=2)
     with pytest.raises(ValueError, match="Prepared point differs"):
         runner._prepare_point(clean, point, p=.001, shots=4, seed=41, point_index=0, batch_size=2)
+
+
+def test_classical_frame_schedule_preserves_idle_noise_and_removes_markers(tmp_path):
+    pytest.importorskip("relay_bp")
+    from lightstim.noise.config import NoiseConfig
+    from lightstim.noise.injector import NoiseInjector
+    from lightstim.qec_code.BB_code.ppm.frame import strip_frame_activity
+
+    schedule = stim.Circuit(
+        "R 0 1\nTICK\nH 1\nI[noiseless] 0\nTICK\nM 0 1\n"
+        "DETECTOR rec[-2]\nOBSERVABLE_INCLUDE(0) rec[-2]")
+    clean = strip_frame_activity(schedule)
+    point = tmp_path / "point"
+    runner._prepare_point(clean, point, p=.001, shots=3, seed=41,
+                          point_index=0, batch_size=2, noise_schedule=schedule)
+    config = NoiseConfig(p_1q=.001, p_2q=.001, p_meas=.001, p_reset=.001, p_idle=.001)
+    injector = NoiseInjector.from_circuit_level_with_idling(config, [0, 1])
+    actual = stim.Circuit.from_file(point / "inputs/circuit.stim")
+    assert actual == strip_frame_activity(injector.inject_noise(schedule))
+    assert actual != injector.inject_noise(clean)
+    assert actual.without_noise() == clean
+    assert all(instruction.name != "I" for instruction in actual)
 
 
 def test_stop_after_complete_point_does_not_sample_next_point(toy_experiment, tmp_path, monkeypatch):

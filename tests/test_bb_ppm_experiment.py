@@ -9,6 +9,8 @@ import stim
 
 from lightstim.noise.config import NoiseConfig
 from lightstim.protocols.bb_ppm import BBPPMExperiment, BBPPMOutcome, BBPPMStep
+from lightstim.qec_code.BB_code.ppm.frame import unpack, strip_frame_activity
+from lightstim.qec_code.BB_code.ppm.native_round import rewrite_parity
 from lightstim.qec_code.BB_code.ppm.shift import build_tour_de_gross_code, logical_shift_tableaus
 from lightstim.qec_code.BB_code.ppm.lowering import (
     BBPPMCompiler, Measure, PauliFrameUpdate, RecordParity, Shift,
@@ -31,8 +33,28 @@ def _assert_clean_physical(circuit):
     assert circuit.num_detectors > 0
     assert circuit.num_observables > 0
     assert all(inst.name != 'MPP' for inst in circuit.flattened())
+    assert not any(inst.name in ('CX', 'CY', 'CZ') and
+                   any(target.is_measurement_record_target for target in inst.targets_copy())
+                   for inst in circuit.flattened())
     assert not circuit.compile_detector_sampler(seed=491).sample(32, append_observables=True).any()
     circuit.detector_error_model()
+
+
+def _frame_expectation(experiment, simulator, pauli):
+    """Compare the effective logical state with an independent Stim simulation."""
+    support = {q: 'IXYZ'[pauli[q]] for q in pauli.pauli_indices()}
+    records, constant = unpack(experiment.builder.frame.anticommutes(support))
+    records, constant = rewrite_parity(records, constant, experiment.basis_blocks)
+    raw = np.asarray(simulator.current_measurement_record(), dtype=bool)
+    assert not records or max(records) < len(raw)
+    sign_flip = bool(np.logical_xor.reduce(raw[list(records)], initial=constant))
+    return simulator.peek_observable_expectation(pauli) * (-1 if sign_flip else 1)
+
+
+def _effective_readout(experiment, records, raw):
+    records, constant = experiment.builder.effective_parity(records)
+    records, constant = rewrite_parity(records, constant, experiment.basis_blocks)
+    return np.logical_xor.reduce(raw[:, records], axis=1, initial=constant)
 
 
 @pytest.mark.parametrize('targets', [(), ((0, 'X'),), ((13, 'Z'),),
@@ -74,7 +96,7 @@ def mixed_ppm_plan():
 def _forbid_recompilation(monkeypatch):
     def unexpected():
         pytest.fail('Supplying plans must not obtain or run the logical compiler.')
-    monkeypatch.setattr('lightstim.protocols.bb_ppm._gross_compiler', unexpected)
+    monkeypatch.setattr('lightstim.qec_code.BB_code.ppm.experiment._gross_compiler', unexpected)
 
 
 def test_precompiled_plan_is_used_without_searching(monkeypatch, mixed_ppm_plan):
@@ -157,9 +179,9 @@ def test_precompiled_mixed_ppm_build_preserves_joint_projection(monkeypatch, mix
         sim = stim.TableauSimulator(seed=seed)
         sim.do(prefix)
         outcome = bool(experiment.ppm_outcomes[0].evaluate(sim.current_measurement_record()))
-        assert sim.peek_observable_expectation(target) == (-1 if outcome else 1)
+        assert _frame_expectation(experiment, sim, target) == (-1 if outcome else 1)
         for observable in correlations:
-            assert sim.peek_observable_expectation(observable) == 1
+            assert _frame_expectation(experiment, sim, observable) == 1
         assert sim.peek_observable_expectation(logical_product(((2, 'Z'),))) == 0
         assert sim.peek_observable_expectation(logical_product(((12, 'Z'),))) == 0
 
@@ -203,16 +225,14 @@ def test_repeated_native_measurement_reuses_lpu_and_is_repeatable():
     second = experiment.ppm_outcomes[1].evaluate(raw)
     assert set(first) == {False, True}
     assert np.array_equal(first, second)
-    # Independently read the *physical* logical Z1 Z7 support from the final
-    # data readout. This checks what the returned PPM result means without
-    # adding or redefining any OBSERVABLE_INCLUDE.
+    # Read the logical Z1 Z7 support and account for the classical frame;
+    # this does not add or redefine any OBSERVABLE_INCLUDE.
     z_ops = [op for op in experiment.patch.logical_ops if op['type'] == 'Z']
     support = set(z_ops[0]['pauli']) ^ set(z_ops[6]['pauli'])
     data = sorted(experiment.patch.data_indices)
     offset = circuit.num_measurements - len(data)
     columns = [offset + i for i, q in enumerate(data) if q in support]
-    physical_parity = np.logical_xor.reduce(raw[:, columns], axis=1)
-    assert np.array_equal(second, physical_parity)
+    assert np.array_equal(second, _effective_readout(experiment, columns, raw))
     assert _build(experiment) == circuit
 
 
@@ -230,12 +250,28 @@ def test_general_three_logical_ppm_compiles_and_preserves_known_eigenvalue():
     data = sorted(experiment.patch.data_indices)
     offset = circuit.num_measurements - len(data)
     columns = [offset + i for i, q in enumerate(data) if q in support]
-    assert not np.logical_xor.reduce(raw[:, columns], axis=1).any()
+    assert not _effective_readout(experiment, columns, raw).any()
 
 
 def test_native_ten_round_measurement_is_noiseless():
     experiment = _experiment([((1, 'Z'), (7, 'Z'))], rounds=10)
-    _assert_clean_physical(_build(experiment))
+    circuit = _build(experiment)
+    _assert_clean_physical(circuit)
+    blocks = list(experiment.basis_blocks.values())
+    assert len(blocks) == 10
+    previous_starts = {
+        block['base'] + block['physical'].num_measurements: previous['base']
+        for previous, block in zip(blocks, blocks[1:])
+    }
+    cursor = 0
+    checked = 0
+    for instruction in circuit.flattened():
+        if instruction.name == 'DETECTOR' and cursor in previous_starts:
+            records = [cursor + target.value for target in instruction.targets_copy()]
+            assert records and min(records) >= previous_starts[cursor]
+            checked += 1
+        cursor += instruction.num_measurements
+    assert checked > 0
 
 
 def test_noisy_ppm_uses_existing_bposd_pipeline():
@@ -272,8 +308,8 @@ def test_baseline_prepares_positive_codespace_preserving_logical_inputs(basis):
         initial_states=basis, rounds=1, rounds_init=1, rounds_final=1)
     with pytest.raises(_ReachedFirstPPM):
         _build(experiment)
-    # Independently simulate the actual initialization, syndrome readout and
-    # classically controlled Pauli frame before any logical PPM is applied.
+    # Independently simulate the physical preparation and apply its classical
+    # Pauli frame to expectations before any logical PPM is applied.
     # Both the stabilizer eigenvalues and initial logical state must be fixed.
     operators = experiment.patch.stabilizers + [
         op for op in experiment.patch.logical_ops if op['type'] == basis]
@@ -284,7 +320,7 @@ def test_baseline_prepares_positive_codespace_preserving_logical_inputs(basis):
             pauli = stim.PauliString(experiment.system.num_qubits)
             for q, letter in operator['pauli'].items():
                 pauli[q] = letter
-            assert sim.peek_observable_expectation(pauli) == 1
+            assert _frame_expectation(experiment, sim, pauli) == 1
 
 
 @pytest.mark.slow
@@ -321,12 +357,12 @@ def test_general_ppm_projects_joint_parity_preserving_ghz_coherence(tmp_path):
         sim = stim.TableauSimulator(seed=seed)
         sim.do(prefix)
         outcome = bool(experiment.ppm_outcomes[0].evaluate(sim.current_measurement_record()))
-        assert sim.peek_observable_expectation(target) == (-1 if outcome else 1)
+        assert _frame_expectation(experiment, sim, target) == (-1 if outcome else 1)
         # Independent single-X measurements would destroy these ZZ
         # correlations. They distinguish a joint projector from merely
         # multiplying three independently obtained measurement results.
         for observable in preserved:
-            assert sim.peek_observable_expectation(observable) == 1
+            assert _frame_expectation(experiment, sim, observable) == 1
 
 
 def test_noiseless_boundaries_tag_only_preparation_and_terminal_readout():
@@ -351,3 +387,66 @@ def test_noiseless_boundaries_tag_only_preparation_and_terminal_readout():
         noise_counts.append(sum(inst.name in ('DEPOLARIZE1', 'DEPOLARIZE2', 'X_ERROR', 'Y_ERROR', 'Z_ERROR')
                                 for inst in circuit.flattened()))
     assert 0 < noise_counts[0] < noise_counts[1]
+
+
+@pytest.mark.parametrize('basis', ['X', 'Z'])
+def test_shifted_parity_with_multiple_boundary_and_idle_rounds(basis):
+    class CaptureShiftChecks(BBPPMExperiment):
+        in_shift = False
+
+        def _shift(self, x, y):
+            self.in_shift = True
+            super()._shift(x, y)
+            self.in_shift = False
+
+        def _standalone_se(self, *args, **kwargs):
+            before = self.builder.circuit.num_detectors
+            super()._standalone_se(*args, **kwargs)
+            if self.in_shift:
+                # Discarding these intermediate records loses 132 checks.
+                assert self.builder.circuit.num_detectors - before == 144
+
+    experiment = CaptureShiftChecks(None, [BBPPMStep(((2, basis),))],
+        initial_states=basis, rounds=2, rounds_init=3, rounds_final=2, idle_rounds=1)
+    circuit = _build(experiment)
+    _assert_clean_physical(circuit)
+    raw = circuit.compile_sampler(seed=345).sample(128)
+    assert not experiment.ppm_outcomes[0].evaluate(raw).any()
+
+
+def test_noncommuting_native_sequence_has_expected_random_outcomes():
+    targets = [((1, 'Z'),), ((1, 'X'),), ((1, 'Z'),)]
+    experiment = BBPPMExperiment(None, [BBPPMStep(target) for target in targets],
+        initial_states='Z', rounds=1, rounds_init=2, rounds_final=2)
+    circuit = _build(experiment)
+    _assert_clean_physical(circuit)
+    raw = circuit.compile_sampler(seed=710).sample(128)
+    assert not experiment.ppm_outcomes[0].evaluate(raw).any()
+    assert set(experiment.ppm_outcomes[1].evaluate(raw)) == {False, True}
+    assert set(experiment.ppm_outcomes[2].evaluate(raw)) == {False, True}
+
+
+def test_noise_sweep_preserves_frame_slot_activity_and_is_repeatable():
+    from lightstim.noise.injector import NoiseInjector
+
+    experiment = _experiment([((2, 'Z'),)])
+    clean = _build(experiment)
+    schedule = experiment.noise_schedule
+    assert strip_frame_activity(schedule) == clean
+    assert schedule != clean
+    schedule.clear()
+    assert experiment.noise_schedule.num_measurements == clean.num_measurements
+
+    for p in (0.001, 0.0005):
+        config = NoiseConfig(p_1q=p, p_2q=p, p_meas=p, p_reset=p, p_idle=p)
+        noisy = experiment.build_noisy_circuit(config)
+        assert noisy == experiment.build_noisy_circuit(config)
+        assert noisy.without_noise() == clean
+        assert not any(inst.name == 'I' and inst.tag == 'noiseless'
+                       for inst in noisy.flattened())
+        noisy.detector_error_model()
+        # Omitting the schedule metadata changes which targets receive idle
+        # noise, even though the omitted identities enact no physical gate.
+        direct = NoiseInjector.from_circuit_level_with_idling(
+            config, list(range(clean.num_qubits))).inject_noise(clean)
+        assert direct != noisy

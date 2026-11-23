@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/John-YuehanZhang/LightStim-upstream/blob/codex/bb-code-ppm/benchmarks/logical_ops/reference/bb_ppm/manifest.schema.json",
   "title": "BB PPM recorded aggregate results, version 1",
-  "description": "Structural schema. plot_bb_ppm.read_results additionally verifies the CSV digest, exact row equality, count identities, exact confidence intervals, fixed sample budgets, and requested experiment identity. Original archive references are provenance identifiers, not bundled files.",
+  "description": "Structural schema for fixed-shot BB PPM aggregate results. plot_bb_ppm.read_results additionally verifies CSV hashes, exact row equality, count identities, exact binomial intervals, shot budgets, and experiment identity. Relative archive paths identify local provenance files that are not bundled with the example.",
   "type": "object",
   "required": [
     "schema_version",
@@ -189,6 +189,14 @@
         },
         "final_basis": {
           "type": "string"
+        },
+        "measurement_instructions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shift_instructions": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -204,6 +212,10 @@
         },
         "parameters": {
           "type": "object"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -245,6 +257,9 @@
         "circuit_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "p0_silent": {
+          "type": "boolean"
         }
       }
     },
@@ -260,6 +275,38 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "exclusiveMaximum": 1
+          },
+          "source_manifest_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decoder_manifest_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_manifest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?![A-Za-z]:)[^\\\\]+$"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "decoder_manifest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?![A-Za-z]:)[^\\\\]+$"
+              },
+              {
+                "type": "object"
+              }
+            ]
           }
         }
       }
@@ -277,8 +324,46 @@
         "threads_per_worker": {
           "type": "integer",
           "minimum": 1
+        },
+        "start_method": {
+          "enum": [
+            "spawn",
+            "fork",
+            "forkserver"
+          ]
         }
       }
+    },
+    "campaign_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_seed_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "no_outcome_based_stopping": {
+      "const": true
+    },
+    "example_only": {
+      "type": "boolean",
+      "description": "True identifies a small execution example rather than a precision low-LER measurement."
+    },
+    "description": {
+      "type": "string"
+    },
+    "local_archive": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)[^\\\\]+$"
+    },
+    "updated_utc": {
+      "type": "string",
+      "format": "date-time"
     }
   }
 }

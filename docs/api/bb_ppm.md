@@ -110,18 +110,45 @@ clean = experiment.build()
 - `plans` holds one logical lowering plan per requested PPM.
 - `ppm_outcomes` is populated during `build()`, keyed by step index.
 - `builder`, `tracker`, and `system` expose the constructed LightStim objects.
+- `build_noisy_circuit(noise_params, noise_model=None)` applies an existing
+  LightStim noise model to the most recently built schedule.
+- `noise_schedule` returns a copy of that schedule, including identity markers
+  used only to preserve idle-noise placement. External noise injection must use
+  this schedule instead of the marker-free return from `build()`.
 
-After the initial extraction, record-controlled pure-error Paulis put the
-known random syndrome signs into the +1 code sector while preserving the
-prepared logical eigenvalues. This preparation frame is necessary: the
+For a noise sweep on one compiled experiment:
+
+```python
+from lightstim.noise.config import NoiseConfig
+
+noisy = experiment.build_noisy_circuit(NoiseConfig(
+    p_1q=1e-3, p_2q=1e-3, p_meas=1e-3, p_reset=1e-3, p_idle=1e-3,
+))
+```
+
+The tracker follows the uncorrected physical state. `ppm_outcomes` already
+includes classical frame corrections. Raw final data readouts or intermediate
+state expectations must likewise be interpreted in that frame; physical state
+vectors need not equal those from a circuit with explicit feedback gates.
+
+After the initial extraction, a classical Pauli frame puts the known random
+syndrome signs into the +1 code sector while preserving the prepared logical
+eigenvalues. Conditional Pauli corrections update this frame; they do not add
+physical correction gates. This preparation frame is necessary: the
 paper's shift maps are equalities modulo stabilizers and would otherwise
 carry syndrome-dependent signs. Subsequent noisy rounds are not idealized or
 corrected by an extra oracle decoder.
 
 The protocol registers the LPU, changes active checks, measures the merged
-checks, reads out the LPU edge qubits, and applies the resulting Pauli feedback.
-Physical shift instructions likewise run through the builder/tracker. The
-protocol does not manually define `DETECTOR` or `OBSERVABLE_INCLUDE`.
+checks, reads out the LPU edge qubits, and updates the resulting Pauli frame.
+The physical lowering lives in `lightstim/qec_code/BB_code/ppm/`; the protocol
+module is its public import facade. It uses the existing builder and tracker
+without changes. Complete extraction rounds keep check records local in time.
+For Bell readouts, the tracker uses the joint parity and the independent random
+bit, then their record coordinates are translated back to the physical readout.
+Shift measurements retain the state needed by subsequent extraction rounds.
+`DETECTOR` and `OBSERVABLE_INCLUDE` are generated automatically by LightStim;
+the BB layer only translates the coordinates of those existing record parities.
 
 ## Measurement results versus LER observables
 
@@ -170,8 +197,8 @@ not a claim that the paper specifies this exact search algorithm.
 
 `RecordParity(keys, constant)` denotes XOR, including cancellation of repeated
 keys. A consumer must implement the frame updates; ignoring them changes the
-operation. The protocol uses record-controlled Pauli feedback through the
-builder.
+operation. The protocol propagates a classical Pauli frame through its physical
+Clifford circuit and converts returned PPM results to raw measurement parities.
 
 For the Eq. (16) rotation with middle measurement `X_a R`, the compiler measures
 `Z_a`, `X_a R`, and `Y_a`, with result bits `a, m, s`. To implement
@@ -292,8 +319,9 @@ not change the identity of its operations.
 
 ## Sampling, decoding, and plotting
 
-The notebook defaults to a read-only display of the bundled reference counts.
-To run a new experiment, set `RUN_SAMPLING = True`, select a new run directory,
+The notebook runs a five-shot example at each of three noise points. These
+small counts demonstrate execution and plotting; they do not estimate rare
+logical failures accurately. Select a new run directory for a new experiment
 and call the same benchmark function used by the CLI:
 
 ```python
@@ -302,8 +330,8 @@ from benchmarks.logical_ops.plot_bb_ppm import display_results
 
 run_campaign(
     sequence=ppm_sequence, plans=plans,
-    p_values=(1e-4, 5e-4, 1e-3), shots=(100_000, 10_000, 10_000),
-    workers=192, run_dir="benchmarks/logical_ops/results/my_bb_ppm",
+    p_values=(1e-4, 5e-4, 1e-3), shots=(5, 5, 5),
+    workers=5, run_dir="benchmarks/logical_ops/results/my_bb_ppm",
     output="benchmarks/logical_ops/results/my_bb_ppm/results.csv",
 )
 display_results("benchmarks/logical_ops/results/my_bb_ppm/results.csv")
@@ -312,7 +340,9 @@ display_results("benchmarks/logical_ops/results/my_bb_ppm/results.csv")
 The experiment reuses supplied plans, constructs a clean circuit through
 `BBPPMExperiment`, then injects the original `circuit_level_with_idling` noise
 with all five physical rates equal to p. Noiseless initial/final boundaries
-and ideal record-controlled Pauli feedback retain their existing exclusions.
+retain their existing exclusions. Temporary noiseless identity markers preserve
+the original feedback slots' idle-noise exclusions; noise injection consumes
+this schedule metadata and the returned physical circuit omits the markers.
 The strict detector error model is not decomposed into graphlike faults.
 
 The fixed-shot benchmark uses the upstream Relay-BP 0.2.2 detailed API with a
@@ -336,11 +366,13 @@ resume an existing run. Completed noise points are published to a CSV with a
 hash-bound manifest. The plotter validates the data and computes exact 95%
 Clopper–Pearson intervals; zero observed errors have a nonzero upper bound.
 
-The original 120,000-shot experiment is preserved as compact reference data
-in `benchmarks/logical_ops/reference/bb_ppm/`. Its manifest records historical
-source and input hashes. Raw samples and checkpoints are local archive data,
-not bundled with the demonstration. New runs use the documented benchmark
-seed policy and are not represented as continuations of that historical run.
+The current unchanged-core example stores five shots at each of three noise
+points in `benchmarks/logical_ops/reference/bb_ppm/`, together with its provenance
+manifest. These small cohorts demonstrate execution and plotting; they do not
+establish a precise low logical error rate. Earlier large-sample results remain
+in repository history and local archives and are not pooled into the example.
+Raw samples and checkpoints remain local rather than being bundled with the
+demonstration. New runs use the documented benchmark seed policy.
 
 See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
 CLI configuration, checkpoint behavior, CSV fields, and plotting commands.
@@ -375,7 +407,6 @@ reproduction of the paper:
 
 ## Running the demonstration or benchmark
 
-See the [notebook walkthrough](../../notebooks/LogicalOps/bb_ppm_README.md)
-for environment setup and in-place execution of the single demonstration.
 See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
-new runs with configurable worker counts and checkpoint recovery.
+environment setup, the five-shot notebook demonstration, and new runs with
+configurable worker counts and checkpoint recovery.
