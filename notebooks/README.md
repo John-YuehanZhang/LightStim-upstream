@@ -51,7 +51,7 @@ notebooks/
 | `two_patch_LS.ipynb` | `protocols/two_patch_ls.py` | Two-patch ZZ lattice surgery coupler |
 | `multi_patch_LS.ipynb` | *(in-progress)* | Multi-patch lattice surgery; unrotated SC N-patch coupler |
 | `rotated_surface_ppm.ipynb` | `qec_code/surface_code/rotated/ppm/` + `protocols/rotated_surface_ppm.py` | Two-step explicit-route PPM sequence, built via the lowering API and the sequential experiment driver; full-circuit detector slices |
-| [`bb_ppm.ipynb`](LogicalOps/bb_ppm.ipynb) | `qec_code/BB_code/ppm/` + `protocols/bb_ppm.py` | Gross-code PPM compilation, LPU checks, and a full-circuit Relay-BP example with five shots per noise point; [run guide](../benchmarks/logical_ops/README_bb_ppm.md) |
+| [`logical_PPM_BB.ipynb`](LogicalOps/logical_PPM_BB.ipynb) | `qec_code/BB_code/ppm/` + `protocols/bb_ppm.py` | Gross-code PPM compilation, LPU checks, and a Y1 measurement circuit with five Relay-BP shots per noise point; [run guide](../benchmarks/logical_ops/README_bb_ppm.md) |
 
 ### Memory/
 

@@ -91,7 +91,7 @@ def test_invalid_statistics_rejected_even_when_rehashed(zero_first_point_results
     {"expected_plan_sha256": "0"*64},
     {"decoder_params": {"alpha": 1}},
     {"shots_by_p": {.0001: 50, .0005: 50, .001: 50}},
-    {"expected_experiment": {"target": "Y1"}},
+    {"expected_experiment": {"target": "X2 Z7 X12"}},
     {"expected_experiment": {"rounds": 9}},
     {"expected_experiment": {"noise_model": "different"}},
     {"expected_experiment": {"initial_state": "Z"}},
@@ -109,7 +109,7 @@ def test_matching_configuration_accepts_tuple_interval(portable_results):
     result = plot.read_results(portable_results,
         expected_plan_sha256=data["experiment"]["compiled_plan_sha256"],
         decoder_params=params, shots_by_p=data["requested_shots_by_p"],
-        expected_experiment={"target": "X2 Z7 X12", "rounds": 10,
+        expected_experiment={"target": "Y1", "rounds": 10,
                              "initial_state": "X", "final_basis": "X"})
     assert result == data
 
@@ -157,8 +157,8 @@ def test_notebook_display_keeps_resources_separator_and_native_png(portable_resu
     monkeypatch.setattr(IPython.display, "display", outputs.append)
     data = plot.display_results(portable_results)
     resources = dict(outputs[0].itertuples(index=False, name=None))
-    assert resources["Measurement instructions"] == 7
-    assert resources["Shift instructions"] == 4
+    assert resources["Measurement instructions"] == 1
+    assert resources["Shift instructions"] == 0
     assert resources["Noiseless circuit silent"] is True
     assert resources["Compiled plan SHA256"] == data["experiment"]["compiled_plan_sha256"]
     assert resources["Clean circuit SHA256"] == data["experiment"]["clean_circuit_sha256"]

@@ -10,13 +10,15 @@ logical observable export, and noise injection use the existing LightStim
 infrastructure. The benchmark uses Stim sampling and the upstream Relay-BP
 detailed decoder API to retain independent convergence diagnostics.
 
-The demonstration is `notebooks/LogicalOps/bb_ppm.ipynb`. After a setup cell,
+The demonstration is `notebooks/LogicalOps/logical_PPM_BB.ipynb`. After a setup cell,
 its five numbered cells export the 15 basic constructions, inspect 36 shifts
 and 540 native measurements, inspect 245 rotation axes, display a selected
 compilation path, and display recorded LER results or run that exact plan through
 the BB PPM benchmark.
-The default target is `X2 Z7 X12`: one rotation transforms it to `+Y7`, with
-direct central measurement `Y7` and 13 logical operation records overall.
+The notebook target is `Y1`, implemented by one native measurement with no
+shifts or Clifford search. For a composite example, `X2 Z7 X12` requires one
+rotation to `+Y7`, with direct central measurement `Y7` and 13 logical operation
+records overall; it remains the benchmark CLI's default target.
 The runnable benchmark is `benchmarks/logical_ops/run_bb_ppm.py`; its result
 reader and plotter are in `benchmarks/logical_ops/plot_bb_ppm.py`. The notebook
 uses those same functions and does not contain a second sampling implementation.
@@ -366,7 +368,7 @@ resume an existing run. Completed noise points are published to a CSV with a
 hash-bound manifest. The plotter validates the data and computes exact 95%
 Clopper–Pearson intervals; zero observed errors have a nonzero upper bound.
 
-The current unchanged-core example stores five shots at each of three noise
+The current unchanged-core `Y1` example stores five shots at each of three noise
 points in `benchmarks/logical_ops/reference/bb_ppm/`, together with its provenance
 manifest. These small cohorts demonstrate execution and plotting; they do not
 establish a precise low logical error rate. Earlier large-sample results remain

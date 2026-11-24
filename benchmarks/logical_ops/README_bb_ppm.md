@@ -5,8 +5,8 @@ built by `lightstim.protocols.bb_ppm.BBPPMExperiment`. It uses the existing
 LightStim noise injector and upstream Relay-BP detailed decoding, with fixed
 shot budgets and separate logical-failure and nonconvergence counts.
 
-The [single demonstration notebook](../../notebooks/LogicalOps/bb_ppm.ipynb)
-imports the benchmark functions. Its saved example uses five shots at each of
+The [single demonstration notebook](../../notebooks/LogicalOps/logical_PPM_BB.ipynb)
+imports the benchmark functions. Its saved `Y1` example uses five shots at each of
 `p = 0.0001, 0.0005, 0.001`. These small cohorts demonstrate execution and
 reporting; they do not measure a rare logical error rate precisely.
 
@@ -21,18 +21,19 @@ venv/bin/python -m pip install 'relay-bp[stim]==0.2.2' 'nbclient>=0.10' 'nbforma
 venv/bin/python -m ipykernel install --user --name lightstim --display-name LightStim
 ```
 
-Open `notebooks/LogicalOps/bb_ppm.ipynb` in a Jupyter-compatible editor and select
+Open `notebooks/LogicalOps/logical_PPM_BB.ipynb` in a Jupyter-compatible editor and select
 the **LightStim** kernel. `RUN_SAMPLING = False` displays the bundled five-shot
 results without requiring the server's raw samples. To execute a new experiment,
 set `RUN_SAMPLING = True`, choose a new `RUN_DIR`, and run the notebook in order.
 The target is `ppm_sequence` in Cell 4; noise points, shot counts, worker count,
-and decoder parameters are in the setup cell. The example keeps ten extraction
-rounds per basic measurement and changes only the shot budget.
+and decoder parameters are in the setup cell. The `Y1` example keeps ten
+extraction rounds per basic measurement and the frozen full-circuit decoder
+parameters.
 
 To refresh the same notebook's saved outputs:
 
 ```bash
-venv/bin/jupyter-execute notebooks/LogicalOps/bb_ppm.ipynb --inplace --timeout=-1
+venv/bin/jupyter-execute notebooks/LogicalOps/logical_PPM_BB.ipynb --inplace --timeout=-1
 ```
 
 ## Run
@@ -42,7 +43,7 @@ From the repository root, using the LightStim virtual environment:
 ```bash
 # New five-shot example with the recorded target and frozen parameters:
 venv/bin/python benchmarks/logical_ops/run_bb_ppm.py \
-  --target 'X2 Z7 X12' --p-values 0.0001 0.0005 0.001 \
+  --target 'Y1' --p-values 0.0001 0.0005 0.001 \
   --shots 5 --workers 5 \
   --run-dir benchmarks/logical_ops/results/bb_ppm_run \
   --output benchmarks/logical_ops/results/bb_ppm_results.csv
@@ -90,12 +91,14 @@ is capped at 96 CPUs, with one decoder thread per worker.
 
 ## Experiment and metrics
 
-The default target `X2 Z7 X12` expands to seven native measurements and four
-shifts, with ten extraction rounds per native measurement. Preparation and
-readout use uniform X bases with noiseless boundaries. The clean circuit has
-378 physical qubits, 1,115 ticks, 15,510 detectors, and ten declared Observables.
-Noise is the unmodified LightStim `circuit_level_with_idling` model. The strict
-DEM retains correlated faults without graphlike decomposition.
+The notebook's `Y1` target uses one native measurement and no shifts. The
+benchmark CLI still defaults to the composite target `X2 Z7 X12`, which expands
+to seven native measurements and four shifts. Both examples use ten extraction
+rounds per native measurement and uniform X preparation/readout bases with
+noiseless boundaries. The saved resource table reports the executed circuit's
+qubits, ticks, detectors, and Observables. Noise is the unmodified LightStim
+`circuit_level_with_idling` model. The strict DEM retains correlated faults
+without graphlike decomposition.
 
 The BB implementation uses the unchanged upstream `CircuitBuilder` and
 `SyndromeTracker`. Conditional Pauli corrections are tracked classically.
@@ -127,6 +130,16 @@ counts as one logical failure. Syndrome consistency is independently verified
 from the returned correction and detector matrix; it is reported as convergence
 and is not substituted for the logical-failure criterion. This detailed
 benchmark does not change the generic `SimulationPipeline` failure policies.
+
+The `Y1` demo retains uniform X initialization/readout and the frozen tuned
+Relay-BP profile, checking only the automatic Observables available for those
+boundaries; it is not a reproduction of Table 2. The paper uses a Bell-reference
+construction sensitive to both X and Z logical errors, with 23 logical checks
+for a gross-code measurement and ideal initial/final boundaries
+([Appendix A.7](https://arxiv.org/html/2506.03094v1#A7)). Its gross-code in-module
+Table 2 estimates come from fits to sampled failure spectra, alongside direct
+circuit-noise Monte Carlo checks
+([Section 2.6 and Figure 7](https://arxiv.org/html/2506.03094v1#S2.SS6)).
 
 ## Results and plot
 
@@ -161,7 +174,7 @@ Lines connect measured points as a guide to the eye, not a fitted model.
 | `sum_decode_cpu_seconds` | Sum of per-shot decoder timings, not total wall-clock runtime |
 | `source_manifest_sha256`, `decoder_manifest_sha256` | Archived input and decoder identity hashes |
 
-`reference/bb_ppm/` contains the current five-shot-per-point example CSV and
+`reference/bb_ppm/` contains the current five-shot-per-point `Y1` example CSV and
 its provenance manifest. The historical large-shot results used the previous
 implementation and are not pooled into this example. Raw samples and per-shot
 checkpoints remain in the local experiment archive, outside Git. A new run uses

@@ -3,32 +3,32 @@
   "kind": "bb_ppm_recorded_results",
   "status": "complete",
   "raw_shots_in_repository": false,
-  "campaign_identity": "b6f54147ea67d4097c7544ce638d900691bfbff76191e185f646f64c9ea478fa",
-  "run_id": "b68a5ae0ba354a438dfd8b0c1f843d6e",
+  "campaign_identity": "7d5db12c07b9cd83f91295305a418f746d29c386f7d8f13a8e472fc4d99f6ecc",
+  "run_id": "83dffaae9c9b477bbe133267a6302ade",
   "results_csv": {
     "path": "results.csv",
-    "sha256": "c449ef2380d5ed873ad9d827224ea8fd08bbaba580083dec827609d2fedc93e4"
+    "sha256": "968caa0c3846b5c6d0fc06880e777f956ae90e46f536a669b5e88f2a58f16d23"
   },
   "experiment": {
-    "target": "X2 Z7 X12",
-    "compiled_plan_sha256": "f028b3134db48c3f0f7a6c5b9ae97ddcd7c95cffcb59f8cfc0afc28ad1679a37",
-    "clean_circuit_sha256": "726ea020fe132d933beb548c61dd7adcd38a23f32198f815be419101832e3a0b",
+    "target": "Y1",
+    "compiled_plan_sha256": "e1662e140019b044fe0813d908dc5aea18680cd5f0571fd6451453524982ffb3",
+    "clean_circuit_sha256": "9f89848e4441e2049f7551735b5f77a119d4ae9e30d46da2b8895090c1319b77",
     "noise_model": "circuit_level_with_idling",
     "rounds": 10,
     "initial_state": "X",
     "final_basis": "X",
-    "measurement_instructions": 7,
-    "shift_instructions": 4
+    "measurement_instructions": 1,
+    "shift_instructions": 0
   },
   "resources": {
-    "sequence": "X2 Z7 X12",
+    "sequence": "Y1",
     "physical_qubits": 378,
-    "ticks": 1115,
-    "detectors": 15510,
-    "observables": 10,
+    "ticks": 175,
+    "detectors": 2300,
+    "observables": 11,
     "p0_silent": true,
-    "plan_sha256": "f028b3134db48c3f0f7a6c5b9ae97ddcd7c95cffcb59f8cfc0afc28ad1679a37",
-    "circuit_sha256": "726ea020fe132d933beb548c61dd7adcd38a23f32198f815be419101832e3a0b"
+    "plan_sha256": "e1662e140019b044fe0813d908dc5aea18680cd5f0571fd6451453524982ffb3",
+    "circuit_sha256": "9f89848e4441e2049f7551735b5f77a119d4ae9e30d46da2b8895090c1319b77"
   },
   "decoder": {
     "name": "relay-bp",
@@ -64,24 +64,24 @@
   "points": [
     {
       "p": 0.0001,
-      "source_manifest_sha256": "a8ab3a098e32b2ab524517af1b344d426cba20580901f1cc890f07e071c660e6",
-      "decoder_manifest_sha256": "e15c7a141dae4f8a975cf3a3db0e5c72430db7c07c2016ccd8d9106aa2246330",
-      "source_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_000/inputs/manifest.json",
-      "decoder_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_000/decoding/manifest.json"
+      "source_manifest_sha256": "4375bc732cbbd822b114718bcf13f0183f7938e698481c97f05b5124cd722e4b",
+      "decoder_manifest_sha256": "1d30a5a1380879fd6b3dee110a5fcb40c40324a77fbad02f6b80994e55299d82",
+      "source_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_000/inputs/manifest.json",
+      "decoder_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_000/decoding/manifest.json"
     },
     {
       "p": 0.0005,
-      "source_manifest_sha256": "02d63a9c2e50dd3109a33f1c33824713ac9c8a1193d16cd80b64b36e68a9f0fb",
-      "decoder_manifest_sha256": "4c57b8bccf726edb97ee52f3657d74064f281c014cc12f9b31a3870fd2e7832a",
-      "source_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_001/inputs/manifest.json",
-      "decoder_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_001/decoding/manifest.json"
+      "source_manifest_sha256": "1d36e2515ea02bc35220c7641eda1a0d1cd2e9cccebc65ffd92b259054254602",
+      "decoder_manifest_sha256": "f564e6206a52e4f91383ca8c1e397c66e628f1e0c1ad11d863bb426e5ff973c2",
+      "source_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_001/inputs/manifest.json",
+      "decoder_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_001/decoding/manifest.json"
     },
     {
       "p": 0.001,
-      "source_manifest_sha256": "d8222814f44c6877df7e27fec83168442539873647197e1cd2de7b72c26dab1c",
-      "decoder_manifest_sha256": "812a38e56321873e83a14dfc00dfabeaf4a7f5b07ab9cc3bb2aa9a9c57877828",
-      "source_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_002/inputs/manifest.json",
-      "decoder_manifest": "../../results/bb_ppm_demo_no_core_5shots/point_002/decoding/manifest.json"
+      "source_manifest_sha256": "7eb8571d8e9457d6d10ccb3456c7f871e3ee9909f46c06a00c9866f14c835d64",
+      "decoder_manifest_sha256": "1685f0129683099f2dbc257dd35397d16034dd81c09f3bc95bcbfce4a1825c17",
+      "source_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_002/inputs/manifest.json",
+      "decoder_manifest": "../../results/bb_ppm_y1_demo_5shots_20261124/point_002/decoding/manifest.json"
     }
   ],
   "rows": [
@@ -99,9 +99,9 @@
       "ler_95_exact_two_sided_low": 0.0,
       "ler_95_exact_two_sided_high": 0.5218237501049814,
       "ler_95_one_sided_upper": 0.450719728346941,
-      "sum_decode_cpu_seconds": 36.641469844,
-      "source_manifest_sha256": "a8ab3a098e32b2ab524517af1b344d426cba20580901f1cc890f07e071c660e6",
-      "decoder_manifest_sha256": "e15c7a141dae4f8a975cf3a3db0e5c72430db7c07c2016ccd8d9106aa2246330"
+      "sum_decode_cpu_seconds": 1.31835151,
+      "source_manifest_sha256": "4375bc732cbbd822b114718bcf13f0183f7938e698481c97f05b5124cd722e4b",
+      "decoder_manifest_sha256": "1d30a5a1380879fd6b3dee110a5fcb40c40324a77fbad02f6b80994e55299d82"
     },
     {
       "p": 0.0005,
@@ -117,9 +117,9 @@
       "ler_95_exact_two_sided_low": 0.0,
       "ler_95_exact_two_sided_high": 0.5218237501049814,
       "ler_95_one_sided_upper": 0.450719728346941,
-      "sum_decode_cpu_seconds": 106.112826395,
-      "source_manifest_sha256": "02d63a9c2e50dd3109a33f1c33824713ac9c8a1193d16cd80b64b36e68a9f0fb",
-      "decoder_manifest_sha256": "4c57b8bccf726edb97ee52f3657d74064f281c014cc12f9b31a3870fd2e7832a"
+      "sum_decode_cpu_seconds": 3.54633603,
+      "source_manifest_sha256": "1d36e2515ea02bc35220c7641eda1a0d1cd2e9cccebc65ffd92b259054254602",
+      "decoder_manifest_sha256": "f564e6206a52e4f91383ca8c1e397c66e628f1e0c1ad11d863bb426e5ff973c2"
     },
     {
       "p": 0.001,
@@ -135,15 +135,15 @@
       "ler_95_exact_two_sided_low": 0.0,
       "ler_95_exact_two_sided_high": 0.5218237501049814,
       "ler_95_one_sided_upper": 0.450719728346941,
-      "sum_decode_cpu_seconds": 738.329086827,
-      "source_manifest_sha256": "d8222814f44c6877df7e27fec83168442539873647197e1cd2de7b72c26dab1c",
-      "decoder_manifest_sha256": "812a38e56321873e83a14dfc00dfabeaf4a7f5b07ab9cc3bb2aa9a9c57877828"
+      "sum_decode_cpu_seconds": 6.34702464,
+      "source_manifest_sha256": "7eb8571d8e9457d6d10ccb3456c7f871e3ee9909f46c06a00c9866f14c835d64",
+      "decoder_manifest_sha256": "1685f0129683099f2dbc257dd35397d16034dd81c09f3bc95bcbfce4a1825c17"
     }
   ],
-  "updated_utc": "2026-11-23T13:02:48.651030+00:00",
+  "updated_utc": "2026-11-24T03:37:46.258905+00:00",
   "example_only": true,
-  "description": "Five-shot demonstration of the unchanged-core BB PPM implementation; not a precision LER estimate.",
-  "local_archive": "benchmarks/logical_ops/results/bb_ppm_demo_no_core_5shots",
+  "description": "Five-shot Y1 demonstration of the unchanged-core BB PPM implementation; not a precision LER estimate or a reproduction of the paper reference-boundary experiment.",
+  "local_archive": "benchmarks/logical_ops/results/bb_ppm_y1_demo_5shots_20261124",
   "source_snapshot": {
     "benchmarks/logical_ops/bb_ppm_runner.py": "8aa2bb955f47c9488dd547566dd3b7923c3bf9b46fdbc53079c854019ed1ec95",
     "lightstim/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
