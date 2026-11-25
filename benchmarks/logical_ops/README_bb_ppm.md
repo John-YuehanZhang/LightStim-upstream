@@ -6,9 +6,8 @@ LightStim noise injector and upstream Relay-BP detailed decoding, with fixed
 shot budgets and separate logical-failure and nonconvergence counts.
 
 The [single demonstration notebook](../../notebooks/LogicalOps/logical_PPM_BB.ipynb)
-imports the benchmark functions. Its saved `Y1` example uses five shots at each of
-`p = 0.0001, 0.0005, 0.001`. These small cohorts demonstrate execution and
-reporting; they do not measure a rare logical error rate precisely.
+shows the recorded `Y1` results from 1,000,000 shots each at `p = 0.0005` and
+`0.001`, and 100,000 shots at `p = 0.002`.
 
 ## Install and open the notebook
 
@@ -22,7 +21,7 @@ venv/bin/python -m ipykernel install --user --name lightstim --display-name Ligh
 ```
 
 Open `notebooks/LogicalOps/logical_PPM_BB.ipynb` in a Jupyter-compatible editor and select
-the **LightStim** kernel. `RUN_SAMPLING = False` displays the bundled five-shot
+the **LightStim** kernel. `RUN_SAMPLING = False` displays the bundled Y1
 results without requiring the server's raw samples. To execute a new experiment,
 set `RUN_SAMPLING = True`, choose a new `RUN_DIR`, and run the notebook in order.
 The target is `ppm_sequence` in Cell 4; noise points, shot counts, worker count,
@@ -154,7 +153,7 @@ venv/bin/python -m benchmarks.logical_ops.plot_bb_ppm
 
 # Reproduce the recorded three-point figure from a fresh clone:
 venv/bin/python -m benchmarks.logical_ops.plot_bb_ppm \
-  --input benchmarks/logical_ops/reference/bb_ppm/results.csv \
+  --input benchmarks/logical_ops/reference/bb_ppm/y1_large_20261124/results.csv \
   --output benchmarks/logical_ops/results/fig_bb_ppm.png
 ```
 
@@ -174,8 +173,8 @@ Lines connect measured points as a guide to the eye, not a fitted model.
 | `sum_decode_cpu_seconds` | Sum of per-shot decoder timings, not total wall-clock runtime |
 | `source_manifest_sha256`, `decoder_manifest_sha256` | Archived input and decoder identity hashes |
 
-`reference/bb_ppm/` contains the current five-shot-per-point `Y1` example CSV and
-its provenance manifest. The historical large-shot results used the previous
-implementation and are not pooled into this example. Raw samples and per-shot
+`reference/bb_ppm/y1_large_20261124/` contains the 2.1-million-shot Y1 CSV and
+manifest used by the notebook. Its parent directory contains the earlier
+five-shot-per-point example. Raw samples and per-shot
 checkpoints remain in the local experiment archive, outside Git. A new run uses
 the current runner's recorded seed policy and is a new statistical experiment.

@@ -321,10 +321,8 @@ not change the identity of its operations.
 
 ## Sampling, decoding, and plotting
 
-The notebook runs a five-shot example at each of three noise points. These
-small counts demonstrate execution and plotting; they do not estimate rare
-logical failures accurately. Select a new run directory for a new experiment
-and call the same benchmark function used by the CLI:
+The notebook displays a recorded 2.1-million-shot Y1 run at three noise points.
+For a small test run, select a new directory and call the benchmark function:
 
 ```python
 from benchmarks.logical_ops.bb_ppm_runner import run_campaign
@@ -368,13 +366,11 @@ resume an existing run. Completed noise points are published to a CSV with a
 hash-bound manifest. The plotter validates the data and computes exact 95%
 Clopper–Pearson intervals; zero observed errors have a nonzero upper bound.
 
-The current unchanged-core `Y1` example stores five shots at each of three noise
-points in `benchmarks/logical_ops/reference/bb_ppm/`, together with its provenance
-manifest. These small cohorts demonstrate execution and plotting; they do not
-establish a precise low logical error rate. Earlier large-sample results remain
-in repository history and local archives and are not pooled into the example.
-Raw samples and checkpoints remain local rather than being bundled with the
-demonstration. New runs use the documented benchmark seed policy.
+The notebook reads its CSV and provenance manifest from
+`benchmarks/logical_ops/reference/bb_ppm/y1_large_20261124/`. The three
+cohorts have 1,000,000, 1,000,000, and 100,000 shots at physical noise rates
+0.0005, 0.001, and 0.002, respectively. Raw samples and checkpoints are
+stored in the local experiment archive.
 
 See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
 CLI configuration, checkpoint behavior, CSV fields, and plotting commands.
@@ -410,5 +406,5 @@ reproduction of the paper:
 ## Running the demonstration or benchmark
 
 See the [benchmark guide](../../benchmarks/logical_ops/README_bb_ppm.md) for
-environment setup, the five-shot notebook demonstration, and new runs with
+environment setup, the Y1 notebook, and new runs with
 configurable worker counts and checkpoint recovery.
