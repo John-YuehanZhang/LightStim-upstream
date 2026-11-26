@@ -209,6 +209,12 @@ def test_linear_noise_axis_and_rendered_tick_spacing(grid):
             [row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]])
 
     left, right = ax.get_xlim()
+    assert not ax.xaxis.get_offset_text().get_text()
+    if grid == "recorded":
+        assert [tick.label1.get_text() for tick in ax.xaxis.get_major_ticks()
+                if left <= tick.get_loc() <= right] == [
+            "5 × 10⁻⁴", "1 × 10⁻³", "1.5 × 10⁻³", "2 × 10⁻³",
+        ]
     ticks = ax.xaxis.get_major_ticks() + ax.xaxis.get_minor_ticks()
     labels = [tick.label1.get_window_extent(canvas.get_renderer()) for tick in ticks
               if left <= tick.get_loc() <= right and tick.label1.get_visible()

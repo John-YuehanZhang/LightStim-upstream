@@ -20,6 +20,7 @@ import re
 
 
 DEFAULT_RESULTS = Path(__file__).parent / "reference" / "bb_ppm" / "results.csv"
+SUPERSCRIPTS = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
 COUNT_FIELDS = (
     "shots", "logical_failures", "nonconverged", "converged_correct",
     "converged_logical_failure", "unconverged_correct_observables",
@@ -203,6 +204,15 @@ def read_results(results_path=DEFAULT_RESULTS, *, manifest_path=None,
     }
 
 
+def _scientific_tick(value, position):
+    """Format each tick with its own power of ten."""
+    if value == 0:
+        return "0"
+    coefficient, exponent = f"{value:.12e}".split("e")
+    coefficient = coefficient.rstrip("0").rstrip(".")
+    return f"{coefficient} × 10{str(int(exponent)).translate(SUPERSCRIPTS)}"
+
+
 def create_figure(data):
     """Create a Figure with actual zero rates and exact 95% error bars.
 
@@ -235,7 +245,7 @@ def create_figure(data):
         ax = figure.subplots()
         ax.set_xlim(p_min - padding, p_max + padding)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]))
-        ax.ticklabel_format(axis="x", style="sci", scilimits=(-2, 2), useMathText=True)
+        ax.xaxis.set_major_formatter(_scientific_tick)
         if min(lower) > 0:
             ax.set_yscale("log")
             ax.set_title("Logarithmic LER scale", fontsize=12)
@@ -260,12 +270,11 @@ def result_table(data):
     """Return a display table using p's power of ten for each row's probabilities."""
     import pandas as pd
 
-    superscripts = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
     rows = []
     for row in data["results"]:
         exponent = math.floor(math.log10(row["p"]))
         scale = 10.0 ** exponent
-        power = f" × 10{str(exponent).translate(superscripts)}"
+        power = f" × 10{str(exponent).translate(SUPERSCRIPTS)}"
         value = row["ler"] / scale
         lower = row["ler_95_exact_two_sided_low"] / scale
         upper = row["ler_95_exact_two_sided_high"] / scale
