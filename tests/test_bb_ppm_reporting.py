@@ -230,8 +230,8 @@ def test_native_excerpt_uses_actual_stim_layers(pauli, ticks, qubits, previous_l
     lpu = circuit.get_final_qubit_coordinates().keys() - experiment.system.local_to_global_map["bb"].values()
     svg, caption = render_native_circuit_excerpt(circuit, lpu)
     assert circuit == original
-    assert f"Tick {ticks[0]} · {previous_layer}" in svg
-    assert f"Tick {ticks[1]} · CX q{qubits[0]} → q{qubits[1]}" in svg
+    assert f"Tick {ticks[0]} | {previous_layer}" in svg
+    assert f"Tick {ticks[1]} | CX q{qubits[0]} to q{qubits[1]}" in svg
     assert ("Bell pair" in caption) == (pauli == "Y")
     root = ElementTree.fromstring(svg)
     ids = [node.attrib["id"] for node in root.iter() if "id" in node.attrib]

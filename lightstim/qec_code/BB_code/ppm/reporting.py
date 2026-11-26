@@ -110,13 +110,14 @@ def render_native_circuit_excerpt(circuit: stim.Circuit, lpu_qubits: Iterable[in
     _, _, width, height = root.attrib["viewBox"].split()
     stimulus = drawing.replace("<svg ", '<svg id="stim-lpu-layers" ', 1)
     panels = []
-    for index, (layer, label) in enumerate(zip(layers, (first_label, f"CX q{control} → q{target}"))):
+    # GitHub's notebook preview escapes non-ASCII text in inline SVG labels.
+    for index, (layer, label) in enumerate(zip(layers, (first_label, f"CX q{control} to q{target}"))):
         points = [dots[layer, q] for q in (control, target)]
         xs, ys = zip(*points)
         viewport = f"{min(xs)-48:g} {min(ys)-48:g} {max(xs)-min(xs)+96:g} {max(ys)-min(ys)+96:g}"
         left = 8 + index * 412
         panels.append(
-            f'<text x="{left}" y="23" font-size="17">Tick {layer} · {label}</text>'
+            f'<text x="{left}" y="23" font-size="17">Tick {layer} | {label}</text>'
             f'<svg x="{left}" y="36" width="396" height="224" viewBox="{viewport}" overflow="hidden">'
             f'<use xlink:href="#stim-lpu-layers" width="{width}" height="{height}"/>'
         )
