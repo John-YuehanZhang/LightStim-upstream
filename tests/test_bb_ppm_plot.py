@@ -200,6 +200,16 @@ def test_linear_noise_axis_and_rendered_tick_spacing(grid):
     ax = figure.axes[0]
     assert ax.get_yscale() == "log"
     assert ax.get_xscale() == "linear"
+    if grid == "recorded":
+        assert ax.get_title() == "Gross Code Pauli Product Measurement"
+        assert ax.get_xlabel() == "Physical Error Rate $p$"
+        assert ax.get_ylabel() == "Logical Error Rate (LER)"
+        assert ax.get_legend().get_texts()[0].get_text() == r"$\bar{Y}_{1}$"
+        caption, = figure.texts
+        assert "two-sided 95% Clopper–Pearson" in caption.get_text()
+        bounds = caption.get_window_extent(canvas.get_renderer())
+        assert figure.bbox.contains(*bounds.min) and figure.bbox.contains(*bounds.max)
+        assert bounds.y1 < ax.xaxis.label.get_window_extent(canvas.get_renderer()).y0
     line, _, bars = ax.containers[0].lines
     assert list(line.get_xdata()) == [row["p"] for row in rows]
     assert list(line.get_ydata()) == [row["ler"] for row in rows]

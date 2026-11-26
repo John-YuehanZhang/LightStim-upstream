@@ -242,27 +242,31 @@ def create_figure(data):
     with mpl.rc_context():
         apply_paper_style()
         figure = Figure(figsize=(8, 5.4), layout="constrained")
+        figure.get_layout_engine().set(rect=(0, .10, 1, .90))
         ax = figure.subplots()
         ax.set_xlim(p_min - padding, p_max + padding)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]))
         ax.xaxis.set_major_formatter(_scientific_tick)
         if min(lower) > 0:
             ax.set_yscale("log")
-            ax.set_title("Logarithmic LER scale", fontsize=12)
         else:
             ax.set_ylim(-.04 * max(upper), min(1.05, 1.12 * max(upper)))
             ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 2), useMathText=True)
-            ax.set_title("Linear LER scale", fontsize=12)
+        target = re.sub(r"\b([XYZ])(\d+)\b", r"$\\bar{\1}_{\2}$", data["experiment"]["target"])
         ax.errorbar(probabilities, rates, yerr=errors, fmt="o",
-                    color=CODES["bb_144_12_12"], capsize=4,
+                    color=CODES["bb_144_12_12"], capsize=4, label=target,
                     linestyle="-" if data["status"] == "complete" else "none")
+        ax.set_title("Gross Code Pauli Product Measurement")
+        ax.set_xlabel("Physical Error Rate $p$")
+        ax.set_ylabel("Logical Error Rate (LER)")
+        ax.legend(title="Target", loc="lower right")
         ax.tick_params(labelsize=10)
         ax.grid(alpha=.25)
         bold_ticks(ax)
-        figure.supxlabel("Physical error rate $p$ (linear scale)", fontsize=12)
-        figure.supylabel("Logical error rate of the full circuit", fontsize=12)
-        figure.suptitle(f"Full-circuit PPM: {data['experiment']['target']}\n"
-                        "Relay-BP · exact 95% binomial intervals", fontsize=14)
+        figure.text(.02, .02,
+                    "Points show the fraction of shots with at least one logical observable error after Relay-BP decoding.\n"
+                    "Error bars show two-sided 95% Clopper–Pearson confidence intervals.",
+                    fontsize=9, fontweight="normal", va="bottom")
     return figure
 
 
