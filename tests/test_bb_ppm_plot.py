@@ -1,4 +1,5 @@
 """Validate recorded scientific statistics and portable BB PPM plotting."""
+import base64
 import copy
 import csv
 import hashlib
@@ -72,6 +73,9 @@ def test_published_notebook_identifies_its_displayed_results():
     for key in ("source", "manifest"):
         digest = hashlib.sha256((root / recorded[key]).read_bytes()).hexdigest()
         assert digest == recorded[f"{key}_sha256"]
+    ler_image = next(output["data"]["image/png"] for output in notebook["cells"][-1]["outputs"]
+                     if "image/png" in output.get("data", {}))
+    assert base64.b64decode("".join(ler_image)) == (root / recorded["source"]).with_name("ler.png").read_bytes()
     plot.read_results(
         root / recorded["source"], manifest_path=root / recorded["manifest"],
         expected_experiment={"target": "Y1"},
@@ -192,27 +196,27 @@ def test_linear_noise_axis_and_rendered_tick_spacing(grid):
     figure.set_dpi(100)  # The Notebook displays this 8-inch figure at 800 px.
     canvas = FigureCanvasAgg(figure)
     canvas.draw()
-    assert [ax.get_yscale() for ax in figure.axes] == (["linear"] if grid == "single"
-                                                       else ["linear", "log"])
-    for ax in figure.axes:
-        assert ax.get_xscale() == "linear"
-        line, _, bars = ax.containers[0].lines
-        assert list(line.get_xdata()) == [row["p"] for row in rows]
-        assert list(line.get_ydata()) == [row["ler"] for row in rows]
-        assert line.get_linestyle() == ("None" if grid == "partial" else "-")
-        for row, segment in zip(rows, bars[0].get_segments()):
-            assert segment[:, 1] == pytest.approx(
-                [row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]])
+    assert len(figure.axes) == 1
+    ax = figure.axes[0]
+    assert ax.get_yscale() == "log"
+    assert ax.get_xscale() == "linear"
+    line, _, bars = ax.containers[0].lines
+    assert list(line.get_xdata()) == [row["p"] for row in rows]
+    assert list(line.get_ydata()) == [row["ler"] for row in rows]
+    assert line.get_linestyle() == ("None" if grid == "partial" else "-")
+    for row, segment in zip(rows, bars[0].get_segments()):
+        assert segment[:, 1] == pytest.approx(
+            [row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]])
 
-        left, right = ax.get_xlim()
-        ticks = ax.xaxis.get_major_ticks() + ax.xaxis.get_minor_ticks()
-        labels = [tick.label1.get_window_extent(canvas.get_renderer()) for tick in ticks
-                  if left <= tick.get_loc() <= right and tick.label1.get_visible()
-                  and tick.label1.get_text()]
-        labels.sort(key=lambda box: box.x0)
-        assert len(labels) >= 2
-        assert all(left_box.x1 + 2 < right_box.x0 for left_box, right_box
-                   in zip(labels, labels[1:]))
+    left, right = ax.get_xlim()
+    ticks = ax.xaxis.get_major_ticks() + ax.xaxis.get_minor_ticks()
+    labels = [tick.label1.get_window_extent(canvas.get_renderer()) for tick in ticks
+              if left <= tick.get_loc() <= right and tick.label1.get_visible()
+              and tick.label1.get_text()]
+    labels.sort(key=lambda box: box.x0)
+    assert len(labels) >= 2
+    assert all(left_box.x1 + 2 < right_box.x0 for left_box, right_box
+               in zip(labels, labels[1:]))
 
 
 def test_notebook_display_keeps_resources_separator_and_native_png(portable_results, monkeypatch):

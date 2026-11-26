@@ -1,11 +1,13 @@
 """Reports must preserve the compiler's signed implementation and all witnesses."""
 
 import csv
+import hashlib
 import json
+import re
 from dataclasses import asdict
 from itertools import groupby
 from pathlib import Path
-from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import pytest
 import stim
@@ -15,7 +17,7 @@ from lightstim.qec_code.BB_code.ppm.lowering import (
 )
 from lightstim.qec_code.BB_code.ppm.reporting import (
     export_plan_report, export_rotation_catalog, export_shift_and_native_catalogs,
-    format_logical_pauli, format_record_parity, render_native_circuit_excerpt,
+    format_logical_pauli, format_record_parity,
 )
 from lightstim.qec_code.BB_code.ppm.shift import (
     build_tour_de_gross_code, logical_shift_tableau, logical_shift_tableaus,
@@ -217,31 +219,18 @@ def test_direct_measurement_reports_have_no_fabricated_search_rows(compiler, tmp
     assert all(payload["search_trace"] == [] for payload in payloads)
 
 
-@pytest.mark.parametrize("pauli,ticks,qubits,previous_layer", [
-    ("Y", (13, 14), (342, 377), "Ancilla resets"),
-    ("X", (14, 15), (342, 293), "Preceding gate layer"),
-])
-def test_native_excerpt_uses_actual_stim_layers(pauli, ticks, qubits, previous_layer):
-    from lightstim.protocols.bb_ppm import BBPPMExperiment, BBPPMStep
-
-    experiment = BBPPMExperiment(None, [BBPPMStep(((1, pauli),))], rounds=1)
-    circuit = experiment.build()
-    original = circuit.copy()
-    lpu = circuit.get_final_qubit_coordinates().keys() - experiment.system.local_to_global_map["bb"].values()
-    svg, caption = render_native_circuit_excerpt(circuit, lpu)
-    assert circuit == original
-    assert f"Tick {ticks[0]} | {previous_layer}" in svg
-    assert f"Tick {ticks[1]} | CX q{qubits[0]} to q{qubits[1]}" in svg
-    assert ("Bell pair" in caption) == (pauli == "Y")
-    root = ElementTree.fromstring(svg)
-    ids = [node.attrib["id"] for node in root.iter() if "id" in node.attrib]
-    assert len(ids) == len(set(ids))
-    panels = root.findall("{*}svg")
-    assert len(panels) == 2
-    for panel in panels:
-        x, y, width, height = map(float, panel.attrib["viewBox"].split())
-        labels = panel.findall("{*}text")
-        assert [node.text for node in labels] == [f"q{q}" for q in qubits]
-        for node in labels:
-            assert x < float(node.attrib["x"]) < x + width
-            assert y < float(node.attrib["y"]) < y + height
+def test_published_circuit_diagram_contains_the_whole_experiment():
+    root = Path(__file__).resolve().parents[1]
+    notebook = json.loads((root / 'notebooks/LogicalOps/logical_PPM_BB.ipynb').read_text(encoding='utf-8'))
+    cell = next(c for c in notebook['cells'] if c['id'] == 'bb-full-circuit')
+    preview = ''.join(next(o['data']['image/svg+xml'] for o in cell['outputs']
+                           if 'image/svg+xml' in o.get('data', {}))).encode()
+    manifest = root / notebook['metadata']['bb_ppm_results']['manifest']
+    resources = json.loads(manifest.read_text(encoding='utf-8'))['resources']
+    panels = resources['ticks'] + 1
+    with ZipFile(manifest.with_name('full_circuit.zip')) as archive:
+        original = archive.read('full_circuit.svg')
+        digest = hashlib.sha256(original).hexdigest()
+        assert original.count(b'id="qubit_dot:') == panels * resources['physical_qubits']
+        assert preview == archive.read(f'preview/{digest}.svg')
+    assert list(map(int, re.findall(rb"id=['\"]layer(\d+)['\"]", preview))) == list(range(panels))

@@ -29,6 +29,13 @@ and decoder parameters are in the setup cell. The `Y1` example keeps ten
 extraction rounds per basic measurement and the frozen full-circuit decoder
 parameters.
 
+The circuit figure uses Stim's `detslice-with-ops-svg` diagram of the entire
+noiseless experiment. For Y1 it shows all 378 physical qubits in each of the
+176 time panels. The [Y1 circuit archive](reference/bb_ppm/y1_large_20261124/full_circuit.zip)
+contains the original `full_circuit.svg` for zooming and the Notebook's smaller
+SVG, which reuses repeated shapes. The Notebook selects this display copy by
+the SHA-256 of the original drawing.
+
 To refresh the same notebook's saved outputs:
 
 ```bash
@@ -157,13 +164,11 @@ venv/bin/python -m benchmarks.logical_ops.plot_bb_ppm \
   --output benchmarks/logical_ops/results/fig_bb_ppm.png
 ```
 
-The physical error rate is plotted on a linear axis with evenly spaced ticks.
-The linear LER panel retains zero-error points and their upper confidence bounds.
-With at least two completed cohorts and a positive lower 95% Clopper–Pearson
-bound for every point, a second panel shows the same observations and intervals
-on a logarithmic LER axis. An exponential dependence
-on the physical error rate would appear as a straight line in that panel.
-Lines connect measured points as a guide to the eye.
+The [recorded Y1 figure](reference/bb_ppm/y1_large_20261124/ler.png) uses
+a linear physical error rate axis and a logarithmic LER axis. Error bars
+show exact 95% Clopper–Pearson intervals. For datasets with zero observed
+failures at any point, the LER axis uses a linear scale to show zero and its
+upper confidence bound. Lines connect measured points as a guide to the eye.
 
 | CSV field | Meaning |
 |---|---|
