@@ -1,9 +1,9 @@
 """Reports must preserve the compiler's signed implementation and all witnesses."""
 
+import base64
 import csv
 import hashlib
 import json
-import re
 from dataclasses import asdict
 from itertools import groupby
 from pathlib import Path
@@ -223,8 +223,8 @@ def test_published_circuit_diagram_contains_the_whole_experiment():
     root = Path(__file__).resolve().parents[1]
     notebook = json.loads((root / 'notebooks/LogicalOps/logical_PPM_BB.ipynb').read_text(encoding='utf-8'))
     cell = next(c for c in notebook['cells'] if c['id'] == 'bb-full-circuit')
-    preview = ''.join(next(o['data']['image/svg+xml'] for o in cell['outputs']
-                           if 'image/svg+xml' in o.get('data', {}))).encode()
+    preview = base64.b64decode(''.join(next(o['data']['image/png'] for o in cell['outputs']
+                                           if 'image/png' in o.get('data', {}))))
     manifest = root / notebook['metadata']['bb_ppm_results']['manifest']
     resources = json.loads(manifest.read_text(encoding='utf-8'))['resources']
     panels = resources['ticks'] + 1
@@ -232,5 +232,5 @@ def test_published_circuit_diagram_contains_the_whole_experiment():
         original = archive.read('full_circuit.svg')
         digest = hashlib.sha256(original).hexdigest()
         assert original.count(b'id="qubit_dot:') == panels * resources['physical_qubits']
-        assert preview == archive.read(f'preview/{digest}.svg')
-    assert list(map(int, re.findall(rb"id=['\"]layer(\d+)['\"]", preview))) == list(range(panels))
+        assert original.count(b'id="tick_border:') == panels
+        assert preview == archive.read(f'preview/{digest}.png')

@@ -32,9 +32,9 @@ parameters.
 The circuit figure uses Stim's `detslice-with-ops-svg` diagram of the entire
 noiseless experiment. For Y1 it shows all 378 physical qubits in each of the
 176 time panels. The [Y1 circuit archive](reference/bb_ppm/y1_large_20261124/full_circuit.zip)
-contains the original `full_circuit.svg` for zooming and the Notebook's smaller
-SVG, which reuses repeated shapes. The Notebook selects this display copy by
-the SHA-256 of the original drawing.
+contains the original `full_circuit.svg` for zooming and the full-diagram PNG
+shown on GitHub. The Notebook selects this preview by the SHA-256 of the
+original drawing. Set `INLINE_FULL_SVG = True` to view the vector directly in Jupyter.
 
 To refresh the same notebook's saved outputs:
 
