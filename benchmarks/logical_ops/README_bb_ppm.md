@@ -29,12 +29,12 @@ and decoder parameters are in the setup cell. The `Y1` example keeps ten
 extraction rounds per basic measurement and the frozen full-circuit decoder
 parameters.
 
-The circuit figure uses Stim's `detslice-with-ops-svg` diagram of the entire
-noiseless experiment. For Y1 it shows all 378 physical qubits in each of the
-176 time panels. The [Y1 circuit archive](reference/bb_ppm/y1_large_20261124/full_circuit.zip)
-contains the original `full_circuit.svg` for zooming and the full-diagram PNG
-shown on GitHub. The Notebook selects this preview by the SHA-256 of the
-original drawing. Set `INLINE_FULL_SVG = True` to view the vector directly in Jupyter.
+Cell 5 displays Stim's `detslice-with-ops-svg` diagram of the entire noiseless
+experiment. For Y1, all 176 time slices show the 378 physical qubits, with
+four slices per row. Each slice uses the BB memory lattice and centers the LPU
+immediately below it. The spacing is schematic. The cell saves the original
+Stim circuit and the zoomable SVG in `circuit/` under the printed output
+folder. GitHub displays the PNG of the same drawing, matched by its SVG digest.
 
 To refresh the same notebook's saved outputs:
 

@@ -16,8 +16,8 @@ from lightstim.qec_code.BB_code.ppm.lowering import (
     BBPPMCompiler, Measure, PauliFrameUpdate, RecordParity, Shift,
 )
 from lightstim.qec_code.BB_code.ppm.reporting import (
-    export_plan_report, export_rotation_catalog, export_shift_and_native_catalogs,
-    format_logical_pauli, format_record_parity,
+    compact_circuit_layout, export_plan_report, export_rotation_catalog,
+    export_shift_and_native_catalogs, format_logical_pauli, format_record_parity,
 )
 from lightstim.qec_code.BB_code.ppm.shift import (
     build_tour_de_gross_code, logical_shift_tableau, logical_shift_tableaus,
@@ -217,6 +217,36 @@ def test_direct_measurement_reports_have_no_fabricated_search_rows(compiler, tmp
     payloads = json.loads(Path(report["paths"]["plans_json"]).read_text(encoding="utf-8"))["plans"]
     assert [payload["search_status"] for payload in payloads] == ["native", "identity"]
     assert all(payload["search_trace"] == [] for payload in payloads)
+
+
+def test_circuit_layout_moves_lpu_and_its_detector_together():
+    circuit = stim.Circuit("""
+        QUBIT_COORDS(0, 0) 0
+        QUBIT_COORDS(3, 1) 1
+        QUBIT_COORDS(100, 100) 2
+        QUBIT_COORDS(101, 100) 3
+        REPEAT 2 {
+            CX 0 2
+            M 2
+            SHIFT_COORDS(0, 0, 1)
+            DETECTOR(100, 100, 0) rec[-1]
+            TICK
+        }
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+    original = circuit.copy()
+    drawing = compact_circuit_layout(circuit, bb_qubits=2)
+    assert circuit == original
+    assert drawing.get_final_qubit_coordinates() == {
+        0: [0, 0], 1: [3, 1], 2: [1, 3], 3: [2, 3],
+    }
+    assert drawing.get_detector_coordinates() == {0: [1, 3, 1], 1: [1, 3, 2]}
+    for before, after in zip(original.flattened(), drawing, strict=True):
+        if before.name in ('DETECTOR', 'QUBIT_COORDS'):
+            assert (before.name, before.targets_copy()) == (after.name, after.targets_copy())
+        else:
+            assert before == after
+    assert compact_circuit_layout(circuit, bb_qubits=4) == original
 
 
 def test_published_circuit_diagram_contains_the_whole_experiment():
