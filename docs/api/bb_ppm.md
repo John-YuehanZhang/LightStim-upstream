@@ -10,11 +10,13 @@ logical observable export, and noise injection use the existing LightStim
 infrastructure. The benchmark uses Stim sampling and the upstream Relay-BP
 detailed decoder API to retain independent convergence diagnostics.
 
-The demonstration is `notebooks/LogicalOps/logical_PPM_BB.ipynb`. After a setup cell,
-its five numbered cells export the 15 basic constructions, inspect 36 shifts
-and 540 native measurements, inspect 245 rotation axes, display a selected
-compilation path and the complete noiseless BB experiment as a Stim detector-and-operation diagram,
-and display recorded LER results or run that exact plan through the BB PPM benchmark.
+The [short example](../../notebooks/LogicalOps/logical_PPM_BB_code.ipynb) builds a
+PPM through the protocol API, displays the circuit, checks it at zero noise,
+and plots the recorded logical error rates.
+The [detailed notebook](../../notebooks/LogicalOps/logical_PPM_BB.ipynb) also
+exports the 15 basic constructions, inspects 36 shifts
+and 540 native measurements, and shows 245 rotation axes and the selected
+compilation path. Both notebooks can run the compiled plan through the BB PPM benchmark.
 The notebook target is `Y1`, implemented by one native measurement with no
 shifts or Clifford search. For a composite example, `X2 Z7 X12` requires one
 rotation to `+Y7`, with direct central measurement `Y7` and 13 logical operation

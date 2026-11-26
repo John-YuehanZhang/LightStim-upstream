@@ -5,9 +5,11 @@ built by `lightstim.protocols.bb_ppm.BBPPMExperiment`. It uses the existing
 LightStim noise injector and upstream Relay-BP detailed decoding, with fixed
 shot budgets and separate logical-failure and nonconvergence counts.
 
-The [single demonstration notebook](../../notebooks/LogicalOps/logical_PPM_BB.ipynb)
-shows the recorded `Y1` results from 1,000,000 shots each at `p = 0.0005` and
-`0.001`, and 100,000 shots at `p = 0.002`.
+The [short example](../../notebooks/LogicalOps/logical_PPM_BB_code.ipynb) builds and
+checks the circuit, then plots the recorded `Y1` results from 1,000,000 shots
+each at `p = 0.0005` and `0.001`, and 100,000 shots at `p = 0.002`. The
+[detailed notebook](../../notebooks/LogicalOps/logical_PPM_BB.ipynb) also shows
+the stabilizer definitions, native operations, and compilation steps.
 
 ## Install and open the notebook
 
