@@ -13,8 +13,8 @@ detailed decoder API to retain independent convergence diagnostics.
 The demonstration is `notebooks/LogicalOps/logical_PPM_BB.ipynb`. After a setup cell,
 its five numbered cells export the 15 basic constructions, inspect 36 shifts
 and 540 native measurements, inspect 245 rotation axes, display a selected
-compilation path, and display recorded LER results or run that exact plan through
-the BB PPM benchmark.
+compilation path and a local Stim circuit diagram of its first native measurement,
+and display recorded LER results or run that exact plan through the BB PPM benchmark.
 The notebook target is `Y1`, implemented by one native measurement with no
 shifts or Clifford search. For a composite example, `X2 Z7 X12` requires one
 rotation to `+Y7`, with direct central measurement `Y7` and 13 logical operation

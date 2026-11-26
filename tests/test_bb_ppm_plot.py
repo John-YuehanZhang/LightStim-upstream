@@ -158,6 +158,7 @@ def test_connected_figure_preserves_zero_and_style(zero_first_point_results):
     before = dict(mpl.rcParams)
     figure = plot.create_figure(data)
     assert dict(mpl.rcParams) == before
+    assert len(figure.axes) == 1
     axes = figure.axes[0]
     points = axes.containers[0].lines[0]
     assert list(points.get_xdata()) == [.0001, .0005, .001]
@@ -168,6 +169,50 @@ def test_connected_figure_preserves_zero_and_style(zero_first_point_results):
     intervals = axes.containers[0].lines[2][0].get_segments()
     assert intervals[0][0][1] == 0
     assert intervals[0][1][1] == data["results"][0]["ler_95_exact_two_sided_high"]
+
+
+@pytest.mark.parametrize("grid", ["recorded", "dense", "partial", "single"])
+def test_linear_noise_axis_and_rendered_tick_spacing(grid):
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    data = plot.read_results(plot.DEFAULT_RESULTS.parent / "y1_large_20261124/results.csv")
+    rows = data["results"]
+    if grid == "dense":
+        rows = [dict(rows[0], p=.0005 + i * 1e-6) for i in range(50)]
+        data["requested_shots_by_p"] = {row["p"]: row["shots"] for row in rows}
+    elif grid == "partial":
+        rows = rows[:2]
+        data["status"] = "partial"
+    elif grid == "single":
+        rows = rows[:1]
+        data["requested_shots_by_p"] = {rows[0]["p"]: rows[0]["shots"]}
+    data["results"] = rows
+
+    figure = plot.create_figure(data)
+    figure.set_dpi(100)  # The Notebook displays this 8-inch figure at 800 px.
+    canvas = FigureCanvasAgg(figure)
+    canvas.draw()
+    assert [ax.get_yscale() for ax in figure.axes] == (["linear"] if grid == "single"
+                                                       else ["linear", "log"])
+    for ax in figure.axes:
+        assert ax.get_xscale() == "linear"
+        line, _, bars = ax.containers[0].lines
+        assert list(line.get_xdata()) == [row["p"] for row in rows]
+        assert list(line.get_ydata()) == [row["ler"] for row in rows]
+        assert line.get_linestyle() == ("None" if grid == "partial" else "-")
+        for row, segment in zip(rows, bars[0].get_segments()):
+            assert segment[:, 1] == pytest.approx(
+                [row["ler_95_exact_two_sided_low"], row["ler_95_exact_two_sided_high"]])
+
+        left, right = ax.get_xlim()
+        ticks = ax.xaxis.get_major_ticks() + ax.xaxis.get_minor_ticks()
+        labels = [tick.label1.get_window_extent(canvas.get_renderer()) for tick in ticks
+                  if left <= tick.get_loc() <= right and tick.label1.get_visible()
+                  and tick.label1.get_text()]
+        labels.sort(key=lambda box: box.x0)
+        assert len(labels) >= 2
+        assert all(left_box.x1 + 2 < right_box.x0 for left_box, right_box
+                   in zip(labels, labels[1:]))
 
 
 def test_notebook_display_keeps_resources_separator_and_native_png(portable_results, monkeypatch):

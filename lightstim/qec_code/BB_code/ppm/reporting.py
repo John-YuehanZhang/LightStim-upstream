@@ -18,6 +18,7 @@ from io import BytesIO
 from itertools import groupby
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree
 
 import stim
 
@@ -49,6 +50,89 @@ def format_record_parity(parity: RecordParity) -> str:
     if parity.constant:
         terms.append("1")
     return " XOR ".join(terms) if terms else "0"
+
+
+def _first_lpu_cx(circuit, lpu_qubits):
+    """Locate the first LPU-to-LPU CX and its preceding reset layer."""
+    tick = 0
+    previous_resets, resets = {}, {}
+    for instruction in circuit.flattened():
+        if instruction.name == "TICK":
+            tick += 1
+            previous_resets, resets = resets, {}
+        elif instruction.name in ("R", "RX", "RY"):
+            basis = {"R": "Z", "RX": "X", "RY": "Y"}[instruction.name]
+            resets.update((q.value, basis) for q in instruction.targets_copy())
+        elif instruction.name == "CX":
+            targets = instruction.targets_copy()
+            for a, b in zip(targets[::2], targets[1::2]):
+                if a.is_qubit_target and b.is_qubit_target and {a.value, b.value} <= lpu_qubits:
+                    return tick, a.value, b.value, previous_resets
+    raise ValueError("The circuit contains no CX between two LPU qubits.")
+
+
+def render_native_circuit_excerpt(circuit: stim.Circuit, lpu_qubits: Iterable[int]) -> tuple[str, str]:
+    """Zoom Stim's detector-and-operation drawing around the first native LPU CX.
+
+    The two panels share one drawing of consecutive ticks of the complete
+    circuit. Zooming its viewports retains Stim's gate geometry and detector
+    regions, including checks whose support extends beyond the visible area.
+    """
+    clean = circuit.without_noise()
+    tick, control, target, resets = _first_lpu_cx(clean, set(lpu_qubits))
+    if tick == 0:
+        raise ValueError("The selected CX has no preceding tick to display.")
+    layers = (tick - 1, tick)
+    coordinates = clean.get_final_qubit_coordinates()
+    drawing = str(clean.diagram(
+        "detslice-with-ops-svg", tick=range(tick - 1, tick + 1), rows=1,
+        filter_coords=[coordinates[control]],
+    ))
+    # Stim identifies each dot by physical qubit, coordinates, and tick.
+    root = ElementTree.fromstring(drawing)
+    dots = {}
+    for node in root.iter():
+        fields = node.get("id", "").split(":")
+        if fields[0] == "qubit_dot" and int(fields[1]) in (control, target):
+            dots[int(fields[-1]), int(fields[1])] = float(node.attrib["cx"]), float(node.attrib["cy"])
+
+    reset_pair = control in resets and target in resets
+    first_label = "Ancilla resets" if reset_pair else "Preceding gate layer"
+    caption = (f"At tick {tick - 1}, q{control} is reset in {resets[control]} "
+               f"and q{target} in {resets[target]}. " if reset_pair else "")
+    caption += f"At tick {tick}, CX acts from q{control} to q{target}"
+    caption += (" to prepare a Bell pair." if reset_pair and
+                (resets[control], resets[target]) == ("X", "Z") else ".")
+    caption += " Detector shading is filtered to the control ancilla's coordinates."
+
+    # Reference the same full-size Stim SVG in both cropped panels. Its
+    # intrinsic dimensions keep the extracted dot positions in Stim units.
+    _, _, width, height = root.attrib["viewBox"].split()
+    stimulus = drawing.replace("<svg ", '<svg id="stim-lpu-layers" ', 1)
+    panels = []
+    for index, (layer, label) in enumerate(zip(layers, (first_label, f"CX q{control} → q{target}"))):
+        points = [dots[layer, q] for q in (control, target)]
+        xs, ys = zip(*points)
+        viewport = f"{min(xs)-48:g} {min(ys)-48:g} {max(xs)-min(xs)+96:g} {max(ys)-min(ys)+96:g}"
+        left = 8 + index * 412
+        panels.append(
+            f'<text x="{left}" y="23" font-size="17">Tick {layer} · {label}</text>'
+            f'<svg x="{left}" y="36" width="396" height="224" viewBox="{viewport}" overflow="hidden">'
+            f'<use xlink:href="#stim-lpu-layers" width="{width}" height="{height}"/>'
+        )
+        for q, (x, y) in zip((control, target), points):
+            panels.append(
+                f'<rect x="{x-23:g}" y="{y-41:g}" width="46" height="19" fill="white"/>'
+                f'<text x="{x:g}" y="{y-26:g}" font-size="15" text-anchor="middle">q{q}</text>'
+            )
+        panels.append("</svg>")
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        'viewBox="0 0 824 268" width="824" height="268" font-family="sans-serif">'
+        f'<title>{escape(caption)}</title><defs>{stimulus}</defs>'
+        '<rect width="824" height="268" fill="white"/>' + "".join(panels) + "</svg>"
+    )
+    return svg, caption
 
 
 def _shift_label(key) -> str:

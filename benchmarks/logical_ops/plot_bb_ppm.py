@@ -207,44 +207,54 @@ def create_figure(data):
     """Create a Figure with actual zero rates and exact 95% error bars.
 
     Connecting lines guide the eye; they are not a fitted error-rate model.
-    A zero count remains at zero on a linear y axis, with a nonzero upper bound.
+    Physical error probabilities are spaced linearly. A second view uses a
+    logarithmic LER scale when at least two positive intervals are available
+    and every displayed interval lies above zero.
     The one-sided 95% upper bound is reported separately in the display table.
     """
     import matplotlib as mpl
     from matplotlib.figure import Figure
+    from matplotlib.ticker import MaxNLocator
     from lightstim.plot.styles import apply_paper_style, bold_ticks, CODES
 
     rows = sorted(data["results"], key=lambda row: row["p"])
     _validate_rows(rows)
     if not rows:
         raise ValueError("There are no completed fixed-N results to plot.")
+    probabilities = [row["p"] for row in rows]
+    rates = [row["ler"] for row in rows]
+    lower = [row["ler_95_exact_two_sided_low"] for row in rows]
+    upper = [row["ler_95_exact_two_sided_high"] for row in rows]
+    errors = [[rate - low for rate, low in zip(rates, lower)],
+              [high - rate for rate, high in zip(rates, upper)]]
+    show_log = len(rows) >= 2 and min(lower) > 0
+    p_min, p_max = min(data["requested_shots_by_p"]), max(data["requested_shots_by_p"])
+    padding = .08 * (p_max - p_min or p_min)
     with mpl.rc_context():
         apply_paper_style()
         figure = Figure(figsize=(8, 5.4), layout="constrained")
-        ax = figure.subplots()
-        ax.errorbar(
-            [row["p"] for row in rows], [row["ler"] for row in rows],
-            yerr=[[row["ler"]-row["ler_95_exact_two_sided_low"] for row in rows],
-                  [row["ler_95_exact_two_sided_high"]-row["ler"] for row in rows]],
-            fmt="o", color=CODES["bb_144_12_12"], capsize=5,
-            linestyle="-" if data["status"] == "complete" else "none")
-        upper = max(row["ler_95_exact_two_sided_high"] for row in rows)
-        ax.set_ylim(-.08*upper, min(1.05, 1.25*upper))
-        ax.set_xscale("log")
-        points = sorted(data["requested_shots_by_p"])
-        ax.set_xlim(min(points)*.6, max(points)*1.7)
-        ax.set_xticks(points, labels=[f"{p:g}" for p in points])
-        ax.set_xlabel("Physical error probability p", fontsize=13)
-        ax.set_ylabel("Logical error rate of the full circuit", fontsize=13)
-        ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 2))
-        ax.set_title(f"Full-circuit PPM: {data['experiment']['target']}\n"
-                     "Relay-BP; exact 95% binomial intervals", fontsize=14)
-        ax.grid(alpha=.25)
-        for row in rows:
-            ax.annotate(f"{row['logical_failures']:,}/{row['shots']:,}",
-                        (row["p"], row["ler"]), xytext=(8, 9),
-                        textcoords="offset points", fontsize=10)
-        bold_ticks(ax)
+        axes = figure.subplots(ncols=2 if show_log else 1, sharex=True, squeeze=False)[0]
+        linear = axes[0]
+        linear.set_xlim(p_min - padding, p_max + padding)
+        linear.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]))
+        linear.ticklabel_format(axis="x", style="sci", scilimits=(-2, 2), useMathText=True)
+        linear.set_ylim(-.04 * max(upper), min(1.05, 1.12 * max(upper)))
+        linear.ticklabel_format(axis="y", style="sci", scilimits=(-2, 2), useMathText=True)
+        linear.set_title("Linear LER scale", fontsize=12)
+        if show_log:
+            axes[1].set_yscale("log")
+            axes[1].set_title("Logarithmic LER scale", fontsize=12)
+        for ax in axes:
+            ax.errorbar(probabilities, rates, yerr=errors, fmt="o",
+                        color=CODES["bb_144_12_12"], capsize=4,
+                        linestyle="-" if data["status"] == "complete" else "none")
+            ax.tick_params(labelsize=10)
+            ax.grid(alpha=.25)
+            bold_ticks(ax)
+        figure.supxlabel("Physical error rate $p$ (linear scale)", fontsize=12)
+        figure.supylabel("Logical error rate of the full circuit", fontsize=12)
+        figure.suptitle(f"Full-circuit PPM: {data['experiment']['target']}\n"
+                        "Relay-BP · exact 95% binomial intervals", fontsize=14)
     return figure
 
 
@@ -318,6 +328,9 @@ def display_results(results_path=DEFAULT_RESULTS, *, expected_plan_sha256=None,
         buffer = io.BytesIO()
         figure.savefig(buffer, format="png", dpi=160)
         display(Image(data=buffer.getvalue(), format="png", width=800, height=540))
+        if len(figure.axes) == 2:
+            print("A linear relationship appears straight on the left. "
+                  "An exponential relationship appears straight on the right.")
     else:
         print("No fixed-N noise point has completed.")
     if any(row["logical_failures"] == 0 for row in data["results"]):

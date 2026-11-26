@@ -157,9 +157,13 @@ venv/bin/python -m benchmarks.logical_ops.plot_bb_ppm \
   --output benchmarks/logical_ops/results/fig_bb_ppm.png
 ```
 
-The plot uses the repository's paper style and exact 95% Clopper–Pearson
-intervals. Zero-error points remain at zero with a nonzero confidence bound.
-Lines connect measured points as a guide to the eye, not a fitted model.
+The physical error rate is plotted on a linear axis with evenly spaced ticks.
+The linear LER panel retains zero-error points and their upper confidence bounds.
+With at least two completed cohorts and a positive lower 95% Clopper–Pearson
+bound for every point, a second panel shows the same observations and intervals
+on a logarithmic LER axis. An exponential dependence
+on the physical error rate would appear as a straight line in that panel.
+Lines connect measured points as a guide to the eye.
 
 | CSV field | Meaning |
 |---|---|
