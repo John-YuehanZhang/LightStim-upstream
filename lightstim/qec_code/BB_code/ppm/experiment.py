@@ -14,7 +14,7 @@ import numpy as np
 import stim
 
 from lightstim.ir.builder import CircuitBuilder
-from lightstim.ir.coupler import LogicalCouplerPatch
+from lightstim.ir.coupler import LogicalCouplerProtocol
 from lightstim.ir.qec_system import QECSystem
 from lightstim.ir.tracker import SyndromeTracker
 from lightstim.noise.injector import NoiseInjector
@@ -75,6 +75,39 @@ def _gross_compiler():
     return BBPPMCompiler(logical_shift_tableaus())
 
 
+def _aux_coord(q):
+    return (100.0 + (q - 288) % 15, 100.0 + (q - 288) // 15)
+
+
+class _BBNativeCoupler(LogicalCouplerProtocol):
+    """Attach one native LPU measurement to its gross-code patch."""
+
+    EXPECTED_PATCH_COUNT = 1
+
+    def _build_coupler_geometry(self, coupler_patch, patches, *, native, index_map):
+        patch, = patches
+        # Native checks use system-wide qubit IDs. Compare them to the patch
+        # stabilizers in canvas coordinates, which both patches share.
+        coords = {index_map[coord]: coord for coord in patch.index_map}
+        for q, role in sorted(native.auxiliary_roles.items()):
+            coords[q] = _aux_coord(q)
+            coupler_patch.add_qubit(*coords[q], role=role)
+        originals = {
+            stab['syn_coord']: {patch.qubit_coords[q]: p for q, p in stab['pauli'].items()}
+            for stab in patch.stabilizers
+        }
+        for check in native.checks:
+            support = {coords[q]: 'IXYZ'[check.pauli[q]] for q in check.pauli.pauli_indices()}
+            syn_coord = coords[check.ancillas[0]]
+            if check.kind == 'bb':
+                if originals[syn_coord] == support:
+                    continue  # Keep unchanged checks on the original patch.
+                coupler_patch.conflicting_stabilizer_coords.add(syn_coord)
+            letters = set(support.values())
+            kind = next(iter(letters)) if len(letters) == 1 and 'Y' not in letters else 'Mixed'
+            coupler_patch.stabilizers.append({'pauli': support, 'type': kind, 'syn_coord': syn_coord})
+
+
 class BBPPMExperiment:
     """Build a single gross-module PPM sequence, then use SimulationPipeline.
 
@@ -96,6 +129,8 @@ class BBPPMExperiment:
         self.code = build_tour_de_gross_code() if code is None else code
         if getattr(self.code, 'logical_preset', None) != 'tour_de_gross':
             raise ValueError('Use build_tour_de_gross_code() for the paper logical basis.')
+        if self.code.shift != (0, 0):
+            raise ValueError('BB PPM requires the gross-code patch at the canvas origin (shift=(0, 0)).')
         self.ppm_sequence = tuple(ppm_sequence)
         if any(not isinstance(s, BBPPMStep) for s in self.ppm_sequence):
             raise TypeError('ppm_sequence must contain BBPPMStep objects.')
@@ -172,34 +207,15 @@ class BBPPMExperiment:
         return ({k: v for k, v in result.items() if k[0] in 'LR'},
                 {k: v for k, v in result.items() if k[0] in 'XZ'})
 
-    @staticmethod
-    def _aux_coord(q):
-        return (100.0 + (q - 288) % 15, 100.0 + (q - 288) // 15)
-
     def _register_native(self, p1, p7):
         data, bb_checks = self._site_maps()
         native = build_native_measurement(p1, p7, data_index=data,
                                           bb_check_indices=bb_checks, ancilla_start=288)
-        name = f'lpu_{p1}{p7}'
-        coupler = LogicalCouplerPatch(name=name)
-        for q, role in sorted(native.auxiliary_roles.items()):
-            coupler.add_qubit(*self._aux_coord(q), role=role)
-        coord = lambda q: (self.system.qubit_coords[q] if q < 288 else self._aux_coord(q))
-        originals = {s['syn_idx']: s for s in self.patch.stabilizers}
-        for check in native.checks:
-            support = {q: 'IXYZ'[check.pauli[q]] for q in check.pauli.pauli_indices()}
-            if check.kind == 'bb':
-                original = originals[check.ancillas[0]]
-                if original['pauli'] == support:
-                    continue  # keep unchanged checks on the original patch
-                coupler.conflicting_stabilizer_coords.add(coord(check.ancillas[0]))
-            letters = set(support.values())
-            kind = next(iter(letters)) if len(letters) == 1 and 'Y' not in letters else 'Mixed'
-            coupler.stabilizers.append({'pauli': {coord(q): p for q, p in support.items()},
-                                       'type': kind, 'syn_coord': coord(check.ancillas[0])})
-        self.system.add_patch(coupler, name=name, is_active=False)
-        self.system.coupler_patches[name] = self.system.patches[name][0]
-        if any(self.system.index_map[self._aux_coord(q)] != q for q in native.all_lpu_qubits):
+        self.system.register_coupler(
+            _BBNativeCoupler(), patch_names=['bb'], name=f'lpu_{p1}{p7}',
+            native=native, index_map=self.system.index_map,
+        )
+        if any(self.system.index_map[_aux_coord(q)] != q for q in native.all_lpu_qubits):
             raise RuntimeError('Unexpected LPU physical allocation.')
         self._natives[p1, p7] = native
 

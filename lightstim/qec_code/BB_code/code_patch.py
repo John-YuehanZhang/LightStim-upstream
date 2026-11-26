@@ -70,6 +70,8 @@ class BBCode(QECPatch):
         Example: [[3,0],[0,1],[0,2]] represents x^3 + y + y^2.
     B : list[list[int]]
         3x2 polynomial matrix, same format as A.
+    logical_preset : str, optional
+        Use ``"tour_de_gross"`` for the paper's ordered gross-code logical basis.
     shift : tuple, optional (default: (0, 0))
         Global coordinate offset.
     d : int, optional
@@ -254,27 +256,34 @@ class BBCode(QECPatch):
     def _build_tour_de_gross_logicals(self):
         """Register the paper's 1..12 logical order, Eqs. (32), (34), (35)."""
         from .logical_presets import TOUR_DE_GROSS_CONFIG, TOUR_DE_GROSS_LOGICALS
-        cfg = TOUR_DE_GROSS_CONFIG
-        norm = lambda terms: {(a % self.l, b % self.m) for a, b in terms}
+
+        def reduced_terms(terms):
+            return {(a % self.l, b % self.m) for a, b in terms}
+
         if (self.l, self.m) != (12, 6) or any(
-            norm(getattr(self, name)) != norm(cfg[name]) for name in ("A", "B")
+            reduced_terms(getattr(self, name)) != reduced_terms(TOUR_DE_GROSS_CONFIG[name])
+            for name in ("A", "B")
         ):
             raise ValueError("tour_de_gross requires the gross-code polynomials of Eq. (27).")
         if any(v is not None for v in (self.f, self.g, self.h, self.alpha, self.beta)):
             raise ValueError("Do not combine tour_de_gross with explicit polynomial logicals.")
         basis = TOUR_DE_GROSS_LOGICALS
         self.num_logicals = 12
-        def add(op, shift, left, right):
+
+        def register_logical(op, shift, left, right):
             coords = _multiply_monomial_by_polynomial(shift, left, self.l, self.m, 'L')
             coords += _multiply_monomial_by_polynomial(shift, right, self.l, self.m, 'R')
             self.create_stim_logical({coord: op for coord in coords}, op)
-        transpose = lambda poly: _transpose_exponents(poly, self.l, self.m)
+
+        def transpose(poly):
+            return _transpose_exponents(poly, self.l, self.m)
+
         for a, b in zip(basis['alpha'], basis['beta']):
-            add('X', a, basis['p'], basis['q'])
-            add('Z', [b[0] + 1, b[1] + 1], transpose(basis['s']), transpose(basis['r']))
+            register_logical('X', a, basis['p'], basis['q'])
+            register_logical('Z', [b[0] + 1, b[1] + 1], transpose(basis['s']), transpose(basis['r']))
         for a, b in zip(basis['alpha'], basis['beta']):
-            add('X', [-b[0], -b[1]], basis['r'], basis['s'])
-            add('Z', [1 - a[0], 1 - a[1]], transpose(basis['q']), transpose(basis['p']))
+            register_logical('X', [-b[0], -b[1]], basis['r'], basis['s'])
+            register_logical('Z', [1 - a[0], 1 - a[1]], transpose(basis['q']), transpose(basis['p']))
 
     def _build_logical_operators_polynomial(self):
         """Build logical X and Z from polynomial params (f,g,h,alpha,beta). O(k) in code size."""

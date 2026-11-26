@@ -30,6 +30,9 @@ Use `build_tour_de_gross_code()`; the pre-existing BB memory-code preset has a
 different logical basis and cannot be substituted without recompiling the
 logical action of every shift.
 
+The physical experiment uses a single patch at its default lattice origin
+`(0, 0)`. Logical shift instructions move quantum data within this patch.
+
 The 15 basic LPU measurements act on logical qubits 1 and 7. Their shift
 conjugates form the native measurement set of Eq. (14), which may involve other
 logical qubits. For general synthesis, logical

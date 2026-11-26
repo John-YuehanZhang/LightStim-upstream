@@ -2,7 +2,9 @@
 
 Keys: (l, m, tuple(A), tuple(B)) with A,B as tuples of tuples for hashability.
 
-Dispatch priority in BBCode._build_logical_operators():
+The named ``tour_de_gross`` preset selects the paper's logical basis and
+cannot be combined with explicit polynomial logicals. Without a named preset,
+BBCode._build_logical_operators() uses this order:
   1. Explicit f,g,h,alpha,beta passed to BBCode() constructor
   2. Preset lookup here (polynomial method, O(k), minimum-weight operators)
   3. Numerical fallback for l*m <= 200 (GF(2) RREF, O((lm)^3), higher-weight)

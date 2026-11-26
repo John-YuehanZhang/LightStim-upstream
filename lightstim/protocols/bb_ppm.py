@@ -4,7 +4,6 @@ from lightstim.qec_code.BB_code.ppm.experiment import (
     BBPPMExperiment,
     BBPPMOutcome,
     BBPPMStep,
-    _gross_compiler,
 )
 
 __all__ = ["BBPPMExperiment", "BBPPMOutcome", "BBPPMStep"]

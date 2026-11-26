@@ -59,6 +59,26 @@ def test_recorded_results_are_portable_and_exact(portable_results):
     assert plot.read_results(portable_results.with_name("manifest.json")) == data
 
 
+def test_published_notebook_identifies_its_displayed_results():
+    root = Path(__file__).resolve().parents[1]
+    notebook_path = root / "notebooks/LogicalOps/logical_PPM_BB.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    recorded = notebook["metadata"]["bb_ppm_results"]
+    setup = next(cell for cell in notebook["cells"]
+                 if "bb-ppm-setup" in cell["metadata"].get("tags", []))
+    stdout = [line for output in setup["outputs"] if output.get("name") == "stdout"
+              for line in "".join(output["text"]).splitlines()]
+    assert f"Result table: {recorded['source']}" in stdout
+    for key in ("source", "manifest"):
+        digest = hashlib.sha256((root / recorded[key]).read_bytes()).hexdigest()
+        assert digest == recorded[f"{key}_sha256"]
+    plot.read_results(
+        root / recorded["source"], manifest_path=root / recorded["manifest"],
+        expected_experiment={"target": "Y1"},
+        shots_by_p={.0005: 1_000_000, .001: 1_000_000, .002: 100_000},
+    )
+
+
 def test_csv_digest_and_manifest_rows_are_both_verified(zero_first_point_results):
     portable_results = zero_first_point_results
     portable_results.write_bytes(portable_results.read_bytes() + b"\n")
@@ -151,10 +171,10 @@ def test_connected_figure_preserves_zero_and_style(zero_first_point_results):
 
 
 def test_notebook_display_keeps_resources_separator_and_native_png(portable_results, monkeypatch):
-    import IPython.display
+    display_module = pytest.importorskip("IPython.display")
 
     outputs = []
-    monkeypatch.setattr(IPython.display, "display", outputs.append)
+    monkeypatch.setattr(display_module, "display", outputs.append)
     data = plot.display_results(portable_results)
     resources = dict(outputs[0].itertuples(index=False, name=None))
     assert resources["Measurement instructions"] == 1
@@ -165,7 +185,7 @@ def test_notebook_display_keeps_resources_separator_and_native_png(portable_resu
     assert len([key for key in resources if key.startswith("Original campaign")]) == len(
         data["manifest"].get("campaigns", []))
     assert outputs[1].data == "<hr>"
-    image = next(item for item in outputs if isinstance(item, IPython.display.Image))
+    image = next(item for item in outputs if isinstance(item, display_module.Image))
     assert image.data.startswith(b"\x89PNG\r\n\x1a\n")
     assert image.width == 800 and image.height == 540
 

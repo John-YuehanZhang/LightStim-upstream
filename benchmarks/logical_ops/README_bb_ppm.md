@@ -85,8 +85,8 @@ resuming without changing the scientific configuration.
 
 The CLI runs in the foreground. For unattended execution, use a persistent
 terminal session. The program writes neither Notebook files nor Git commits.
-Use a worker count appropriate for the machine; the current server allocation
-is capped at 96 CPUs, with one decoder thread per worker.
+Use `--workers` to fit the CPU allocation. Each worker uses one decoder thread.
+The notebook uses up to 32 workers when sampling is enabled.
 
 ## Experiment and metrics
 

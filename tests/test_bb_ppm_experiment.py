@@ -87,6 +87,12 @@ def test_experiment_requires_steps_and_paper_preset():
         BBPPMExperiment(code, [])
 
 
+def test_experiment_rejects_translated_patch_during_setup():
+    code = build_tour_de_gross_code(shift=(2, 4))
+    with pytest.raises(ValueError, match='canvas origin'):
+        BBPPMExperiment(code, [BBPPMStep(((1, 'Y'),))])
+
+
 @pytest.fixture(scope='module')
 def mixed_ppm_plan():
     return BBPPMCompiler(logical_shift_tableaus()).compile(

@@ -10,14 +10,17 @@ is not installed.
 User-facing params flow straight through ``DecoderConfig(params={...})`` to
 ``SinterDecoder_RelayBP``. The important ones (see upstream for the rest):
 
-    alpha               : float | None  -- min-sum scaling factor (None means 1)
+    alpha               : float | None = None  -- check-to-variable message scaling
     gamma0              : float = 0.1    -- uniform memory strength of the first leg
     pre_iter            : int   = 60     -- iteration cap for the first leg
-    num_sets            : int   = 60     -- number of additional relay legs
+    num_sets            : int   = 60     -- maximum number of additional relay legs
     set_max_iter        : int   = 60     -- iteration cap per additional leg
     gamma_dist_interval : (float, float) = (-0.24, 0.66)  -- memory-weight range
     stop_nconv          : int   = 5      -- stop after this many converged solutions
     parallel            : bool  = False  -- relay_bp-internal threading
+
+In the Sinter adapter, ``alpha=None`` and ``alpha=0`` both use a scaling
+factor of 1. Direct calls to ``RelayDecoderF64`` use adaptive scaling at 0.
 
 ``gamma_dist_interval`` is highly sensitive and should be tuned per code/DEM
 using relay_bp's analysis notebooks.

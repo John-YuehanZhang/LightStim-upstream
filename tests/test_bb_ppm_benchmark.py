@@ -10,6 +10,7 @@ import stim
 
 from benchmarks.logical_ops import bb_ppm_runner as runner
 from benchmarks.logical_ops.run_bb_ppm import parse_args
+from tests.conftest import importorskip_safe
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def toy_inputs(tmp_path):
 
 
 def test_spawn_decode_resume_rechecks_hc_oc_without_repeating_tasks(toy_inputs, tmp_path, monkeypatch):
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     destination = tmp_path / "decoded"
     rows, complete, stopped = runner.decode_saved_inputs(toy_inputs, destination, workers=2)
     assert complete and not stopped
@@ -85,7 +86,7 @@ def test_four_categories_and_zero_failure_exact_interval():
 
 
 def test_dem_adapter_checks_parity_and_rejects_lossy_signatures():
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     H, O, priors = runner._audit_dem(stim.DetectorErrorModel("error(0.1) D0 L0\nerror(0.2) D0 L0"))
     assert H.shape == O.shape == (1, 1)
     assert priors == pytest.approx([.1 * .8 + .2 * .9])
@@ -117,7 +118,7 @@ def toy_experiment(monkeypatch):
 
 
 def test_campaign_publication_plot_contract_and_resume(toy_experiment, tmp_path, monkeypatch):
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     from benchmarks.logical_ops.plot_bb_ppm import read_results
     output, directory = tmp_path / "results.csv", tmp_path / "run"
     arguments = dict(p_values=(.001,), shots=4, workers=1, run_dir=directory, output=output, seed=923)
@@ -138,7 +139,7 @@ def test_campaign_publication_plot_contract_and_resume(toy_experiment, tmp_path,
 
 
 def test_prepared_point_from_another_configuration_is_rejected(toy_experiment, tmp_path):
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     clean = toy_experiment(None, []).build()
     point = tmp_path / "point"
     runner._prepare_point(clean, point, p=.001, shots=3, seed=41, point_index=0, batch_size=2)
@@ -149,7 +150,7 @@ def test_prepared_point_from_another_configuration_is_rejected(toy_experiment, t
 
 
 def test_classical_frame_schedule_preserves_idle_noise_and_removes_markers(tmp_path):
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     from lightstim.noise.config import NoiseConfig
     from lightstim.noise.injector import NoiseInjector
     from lightstim.qec_code.BB_code.ppm.frame import strip_frame_activity
@@ -171,7 +172,7 @@ def test_classical_frame_schedule_preserves_idle_noise_and_removes_markers(tmp_p
 
 
 def test_stop_after_complete_point_does_not_sample_next_point(toy_experiment, tmp_path, monkeypatch):
-    pytest.importorskip("relay_bp")
+    importorskip_safe("relay_bp")
     prepared = []
     original = runner._prepare_point
     def prepare(clean, point, **kwargs):
